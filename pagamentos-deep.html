@@ -1,0 +1,1945 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Pagamentos · Deep</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Raleway:wght@200;300;400;500;600;700&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.development.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.development.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Raleway',system-ui,sans-serif;background:#F2F0EB;color:#1A1A1A}
+  ::-webkit-scrollbar{width:4px;height:4px}
+  ::-webkit-scrollbar-thumb{background:#D4C5B0;border-radius:4px}
+  ::-webkit-scrollbar-track{background:transparent}
+  textarea:focus,input:focus,select:focus{outline:none}
+  .fade{animation:fadeUp .18s ease}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+  .spin{animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .overlay{animation:overlayIn .2s ease}
+  @keyframes overlayIn{from{opacity:0}to{opacity:1}}
+  .slide-up{animation:slideUp .2s ease}
+  @keyframes slideUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+  .nav-link{transition:background .15s,color .15s;cursor:pointer}
+  .nav-link:hover{background:rgba(201,187,170,.12)}
+  .nav-link.active{background:rgba(201,187,170,.18)}
+  input[type=file]{display:none}
+  .chart-wrap{position:relative;height:200px}
+  .ring-accent:focus{ring-color:#C9BBAA}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useReducer, useRef, useEffect, useCallback } = React;
+
+/* ═══════════════════════ CONSTANTS ═══════════════════════ */
+const BRAND = { black:'#0A0A0A', beige:'#C9BBAA', beigeLight:'#E8DDD0', pageBg:'#F2F0EB', card:'#FFFFFF' };
+
+/* ═══════════════════════ SUPABASE ═══════════════════════ */
+const SUPABASE_URL = 'https://ffbkmmfpeeltffmdhoei.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZmYmttbWZwZWVsdGZmbWRob2VpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NDI1MDksImV4cCI6MjA5NTExODUwOX0.rwEEry1TpI8Od_hLwrAzbOhWzoNzvP9Qwwljkts4Fbo';
+const SB_H = {
+  'apikey': SUPABASE_KEY,
+  'Authorization': `Bearer ${SUPABASE_KEY}`,
+  'Content-Type': 'application/json',
+  'Prefer': 'return=representation',
+};
+async function sbFetch(table, q='', opts={}) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${q}`, { headers: SB_H, ...opts });
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) throw new Error(data?.message || data?.error || `Supabase ${res.status}`);
+  return data;
+}
+const sbSelect = (t,q='')      => sbFetch(t, q);
+const sbInsert = (t,d)         => sbFetch(t,'',{method:'POST',body:JSON.stringify(d)});
+const sbUpdate = (t,d,q)       => sbFetch(t,q,{method:'PATCH',body:JSON.stringify(d)});
+const sbDelete = (t,q)         => sbFetch(t,q,{method:'DELETE'});
+
+const CATEGORIES = ['Alimentação','Transporte','Material','Publicidade','Eventos','Software','Outros'];
+
+const STATUS = {
+  pending_supervisor:  { label:'Aguard. Supervisora', bg:'#FEF3E2', text:'#B45309', dot:'#F59E0B'  },
+  pending_owner:       { label:'Aguard. Aprovação',   bg:'#EFF6FF', text:'#1D4ED8', dot:'#3B82F6'  },
+  returned_supervisor: { label:'Recusado pelo Dono',  bg:'#FFF7ED', text:'#C2410C', dot:'#F97316'  },
+  pending_payment:     { label:'Env. p/ Pagamento',   bg:'#F5F3FF', text:'#6D28D9', dot:'#8B5CF6'  },
+  completed:           { label:'Pago',                bg:'#F0FDF4', text:'#15803D', dot:'#22C55E'  },
+  rejected:            { label:'Recusado',             bg:'#FEF2F2', text:'#B91C1C', dot:'#EF4444'  },
+};
+
+const ROLE_LABELS = { solicitante:'Solicitante', supervisora:'Supervisora', dono:'Dono', financeiro:'Financeiro', admin:'Admin' };
+
+const CHART_COLORS = {
+  pending_supervisor: '#F59E0B', pending_owner:'#3B82F6',
+  returned_supervisor:'#F97316', pending_payment:'#8B5CF6',
+  completed:'#22C55E', rejected:'#EF4444',
+};
+
+/* ═══════════════════════ TOTVS CONFIG ═══════════════════════ */
+const TOTVS_API = 'https://www30.bhan.com.br:9443/api/totvsmoda/accounts-payable/v2/duplicates';
+const TOTVS_BRANCH_CNPJ = '08882423000194';
+
+const DOCUMENT_TYPES = [
+  {v:1,l:'Duplicata'},{v:2,l:'Boleto bancário'},{v:3,l:'Comissão'},{v:4,l:'Guia (doc.)'},
+  {v:5,l:'Financiamento'},{v:6,l:'Vale'},{v:7,l:'Nota fiscal'},{v:8,l:'Nota de desconto em conta'},
+  {v:9,l:'Taxa de administração'},{v:10,l:'Juros s/ financiamento'},{v:11,l:'Bonificação'},
+  {v:12,l:'Depósito bancário'},{v:13,l:'Compror'},{v:14,l:'Vendor'},{v:15,l:'Recibo'},
+  {v:16,l:'TED / DOC'},{v:17,l:'Empréstimo'},{v:18,l:'Conhecimento de frete'},{v:19,l:'Pro-labore'},
+  {v:20,l:'Adiantamento'},{v:21,l:'Guia (DARF Normal)'},{v:22,l:'Guia (GPS)'},{v:23,l:'Guia (GARE)'},
+  {v:24,l:'Guia (GARE 120)'},{v:25,l:'Guia (FGTS)'},{v:26,l:'Guia (IPTU)'},{v:27,l:'Guia (GNRE)'},
+  {v:28,l:'Guia (DARF Simples)'},{v:29,l:'Guia (DARJ)'},{v:30,l:'Cheque presente'},
+  {v:31,l:'Fatura terceiro'},{v:32,l:'Guia (IPVA)'},{v:33,l:'Guia (Licenciamento)'},
+  {v:34,l:'Guia (DPVAT)'},{v:35,l:'Guia (GARE SP ICMS)'},{v:36,l:'Guia (GARE SP DR)'},
+  {v:37,l:'Guia (GARE SP ITCMD)'},{v:38,l:'Guia (GARE SP ICNS Importação)'},{v:39,l:'Guia (DARE SP)'},
+  {v:40,l:'Guia (ISS)'},{v:41,l:'Guia (DAEMS)'},{v:42,l:'Guia (GNRE-SP)'},{v:50,l:'Outro título'},
+  {v:51,l:'Duplicata pública'},{v:52,l:'Empréstimo concessão'},{v:53,l:'Devolução adiant. cliente'},
+  {v:54,l:'Devolução CREDEV cliente'},{v:55,l:'Comissão (rescisão indenizatória)'},
+];
+
+const PREVISION_TYPES = [
+  {v:1,l:'Previsão'},{v:2,l:'Real'},{v:3,l:'Consignação'},
+];
+
+const STAGE_TYPES = [
+  {v:1,l:'Título não conferido'},{v:2,l:'Liberado para pagamento'},{v:3,l:'Cheque autorizado'},
+  {v:4,l:'Cheque emitido'},{v:5,l:'Título aceito'},{v:10,l:'Endossado'},{v:20,l:'Pagamento em banco'},
+  {v:30,l:'Reservado'},{v:40,l:'Pagamento automático'},{v:41,l:'Envio título agendamento fornecedor'},
+  {v:42,l:'Título em agendamento fornecedor'},{v:43,l:'Pagamento tributo'},{v:70,l:'Com restrição'},
+  {v:71,l:'Com restrição pendência'},{v:90,l:'Liquidado'},
+];
+
+const EXPENSE_TYPES = [
+  {v:1,  l:'ENERGIA ELETRICA'},
+  {v:2,  l:'AGUA E ESGOTO'},
+  {v:3,  l:'IPTU'},
+  {v:4,  l:'TECIDOS'},
+  {v:5,  l:'FRETES COMPRA'},
+  {v:6,  l:'PRODUTO PARA REVENDA'},
+  {v:7,  l:'FRETES VENDA'},
+  {v:8,  l:'EMBALAGENS-PRODUCAO'},
+  {v:9,  l:'AVIAMENTOS'},
+  {v:10, l:'SERVICO DE BORDADO'},
+  {v:11, l:'SERVICO DE LAVANDERIA'},
+  {v:12, l:'SERVICO DE SUBLIMACAO/SILK'},
+  {v:13, l:'SERVICO OFICINAS-COSTURA'},
+  {v:14, l:'SERVICO DE TERCEIROS-CORTE EXTERNO'},
+  {v:15, l:'SERVICO DE TERCEIROS-ESTAMPARIA'},
+  {v:16, l:'SERVICO TERCEIROS-INDUSTRIA'},
+  {v:17, l:'SERVICO TERCEIROS-ACABAMENTO'},
+  {v:18, l:'BONIFICACAO'},
+  {v:19, l:'BRINDES'},
+  {v:20, l:'COMISSAO DE GERENTES E SUPERVISORES'},
+  {v:21, l:'COMISSAO DE PARCEIROS'},
+  {v:22, l:'COMISSAO DE VENDEDORES'},
+  {v:23, l:'COMISSOES GUIAS'},
+  {v:24, l:'COMISSOES REPRESENTANTES'},
+  {v:25, l:'DESPESAS LANCAMENTO COLECOES-COMERCIAL'},
+  {v:26, l:'PREVENCAO DE INADIMPLENCIA'},
+  {v:27, l:'SACOLAS E EMBALAGENS-COMERCIAL'},
+  {v:28, l:'VM'},
+  {v:29, l:'COFINS'},
+  {v:30, l:'CSLL'},
+  {v:31, l:'CSRF'},
+  {v:32, l:'ICMS ANTECIPADO'},
+  {v:33, l:'ICMS-SUBSTITUICAO TRIBUTARIA'},
+  {v:34, l:'IPVA'},
+  {v:35, l:'IRPF'},
+  {v:36, l:'IRPJ'},
+  {v:37, l:'IRRF'},
+  {v:38, l:'ISS'},
+  {v:39, l:'ITBI'},
+  {v:40, l:'PIS'},
+  {v:41, l:'SIMPLES NACIONAL'},
+  {v:42, l:'IOF'},
+  {v:43, l:'JUROS DE FACTORING E BANCO'},
+  {v:44, l:'TAXA DE ANTECIPACAO'},
+  {v:45, l:'PRINCIPAL EMPRESTIMO'},
+  {v:46, l:'TAXA ADMINISTRATIVA DE CARTAO'},
+  {v:47, l:'IOF E JUROS COM EMPRESTIMO'},
+  {v:48, l:'ALUGUEL DE MAQUINETA'},
+  {v:49, l:'AJUDA DE CUSTO'},
+  {v:50, l:'ALUGUEL'},
+  {v:51, l:'ALUGUEL DE EQUIPAMENTO'},
+  {v:52, l:'ASSESSORIA CONTABIL'},
+  {v:53, l:'ASSESSORIA JURIDICA'},
+  {v:54, l:'CERTIFICADOS'},
+  {v:55, l:'CHAVEIRO'},
+  {v:56, l:'COLETA DE LIXO'},
+  {v:57, l:'CONDOMINIO'},
+  {v:58, l:'CONSULTORIA OUTROS'},
+  {v:60, l:'ENDOMARKETING'},
+  {v:61, l:'DESPESAS LEGAIS E JURIDICAS'},
+  {v:62, l:'DEDETIZACAO'},
+  {v:63, l:'ESTACIONAMENTOS E CONDUCOES'},
+  {v:64, l:'GAS'},
+  {v:66, l:'INTERNET'},
+  {v:67, l:'MANUTENCAO INDUSTRIAL'},
+  {v:68, l:'MANUTENCAO DE MOVEIS E UTENSILIOS'},
+  {v:69, l:'MANUTENCAO PREDIAL'},
+  {v:70, l:'MATERIAIS DE ESCRITORIO E INFORMATICA'},
+  {v:71, l:'MATERIAIS DE HIGIENE E LIMPEZA'},
+  {v:72, l:'MATERIAL ELETRICO E HIDRAULICO'},
+  {v:73, l:'MULTAS'},
+  {v:74, l:'PESQUISA E DESENVOLVIMENTO'},
+  {v:75, l:'PREVENCAO A INCENDIO'},
+  {v:76, l:'REEMBOLSO A CLIENTE'},
+  {v:77, l:'SEGUROS PATRIMONIAIS'},
+  {v:78, l:'SERVICOS CONTABEIS EXTRAS'},
+  {v:79, l:'SERVICOS DE SEGURANCA'},
+  {v:80, l:'SERVICOS GERAIS PRESTADOS'},
+  {v:81, l:'SOFTWARES'},
+  {v:82, l:'TAXAS PUBLICAS E CARTORIAIS'},
+  {v:83, l:'TAXI/UBER/FRETE ADMINISTRATIVO'},
+  {v:84, l:'TELEFONIA-FIXA'},
+  {v:85, l:'TELEFONIA-MOVEL'},
+  {v:86, l:'USO E CONSUMO'},
+  {v:87, l:'13 SALARIO'},
+  {v:90, l:'BOLSAS E ESTAGIOS'},
+  {v:91, l:'CONFRATERNIZACOES'},
+  {v:92, l:'DIARISTA'},
+  {v:93, l:'FARDAMENTOS'},
+  {v:94, l:'FERIAS'},
+  {v:95, l:'FGTS'},
+  {v:96, l:'GRATIFICACOES'},
+  {v:97, l:'HORAS EXTRAS'},
+  {v:98, l:'INDENIZACOES E ACORDOS TRABALHISTAS'},
+  {v:99, l:'INSS PATRONAL'},
+  {v:100,l:'MEDICAMENTOS'},
+  {v:101,l:'OUTROS GASTOS COM PESSOAL'},
+  {v:102,l:'PENSAO ALIMENTICIA'},
+  {v:103,l:'PLANO DE SAUDE'},
+  {v:104,l:'PREMIACAO-INDUSTRIA'},
+  {v:105,l:'PREMIACAO-COMERCIAL'},
+  {v:106,l:'VALE REFEICAO'},
+  {v:107,l:'RESCISAO'},
+  {v:108,l:'SALARIO'},
+  {v:109,l:'SEGURO DESEMPREGO'},
+  {v:110,l:'SERVICOS DE MEDICINA E SEGURANCA DO TRABALHO'},
+  {v:111,l:'SINDICATOS E ASSOCIACOES DE CLASSE'},
+  {v:112,l:'TREINAMENTOS'},
+  {v:113,l:'VALE TRANSPORTE TRABALHADORES'},
+  {v:114,l:'ALUGUEL DE VEICULOS'},
+  {v:115,l:'COMBUSTIVEIS E LUBRIFICANTES'},
+  {v:116,l:'LICENCIAMENTO VEICULOS'},
+  {v:117,l:'MANUTENCAO E LIMPEZA DE VEICULOS'},
+  {v:118,l:'MULTAS DE TRANSITO'},
+  {v:119,l:'SEGUROS DE VEICULOS'},
+  {v:120,l:'TAXAS DE LEGALIZACAO DE VEICULOS'},
+  {v:121,l:'PRO-LABORE I'},
+  {v:122,l:'PRO-LABORE II'},
+  {v:124,l:'DESPESAS COM VIAGEM COMERCIAL'},
+  {v:125,l:'EVENTOS COMERCIAIS'},
+  {v:126,l:'LANCHE'},
+  {v:127,l:'MATERIAIS GRAFICOS'},
+  {v:128,l:'TAXA DE BAZAR'},
+  {v:129,l:'MARKETING DIVULGACAO, PUBLICIDADE E PROPAGANDA'},
+  {v:130,l:'DOACOES E PATROCINIOS'},
+  {v:131,l:'EVENTOS-MARKETING'},
+  {v:132,l:'SHOOTING-MARKETING'},
+  {v:133,l:'SOFTWARES-MARKETING'},
+  {v:134,l:'MARCAS E PATENTES'},
+  {v:135,l:'ESTACIONAMENTO'},
+  {v:136,l:'REFORMAS E REPAROS'},
+  {v:137,l:'MAQUINAS E EQUIPAMENTOS'},
+  {v:138,l:'MOVEIS E UTENSILIOS'},
+  {v:139,l:'VEICULOS'},
+  {v:140,l:'DESPESAS NAO OPERACIONAIS'},
+  {v:141,l:'ASSESSORIA PRODUCAO'},
+  {v:142,l:'ASSESSORIA COMERCIAL E MARKETING'},
+  {v:144,l:'TECNICO INFORMATICA'},
+  {v:145,l:'SERVICO DE CONSERTOS OU REPARO DE PRODUTOS'},
+  {v:146,l:'ICMS-DIFAL'},
+  {v:147,l:'SOFTWARE AQUISICAO'},
+  {v:148,l:'CONVENIENCIA'},
+  {v:149,l:'MANUTENCAO DE MAQUINAS E EQUIPAMENTOS'},
+  {v:150,l:'TERMOCOLANTE'},
+  {v:152,l:'ALUGUEIS PAGOS-NAO OPERACIONAL'},
+  {v:153,l:'EMPRESTIMOS CONCEDIDOS-FUNCIONARIOS'},
+  {v:154,l:'AJUSTES CARTAO'},
+  {v:156,l:'SERVICO DE TINGIMENTO'},
+  {v:157,l:'SERVICO DE PLISSADO'},
+  {v:158,l:'SERVICO CORTE A LASER'},
+  {v:159,l:'REFEITORIO'},
+  {v:161,l:'HOSPEDAGEM COMERCIAL'},
+  {v:162,l:'HOSPEDAGEM P/ REVENDA'},
+  {v:163,l:'HOSPEDAGEM P/ PRODUCAO'},
+  {v:164,l:'REFORMA'},
+  {v:165,l:'BENFEITORIA'},
+  {v:166,l:'CATERING E ACOES EM LOJA MARKETING'},
+  {v:167,l:'TAXA ADM DE BOLETOS'},
+  {v:168,l:'PACOTE DE SERVICO BANCARIO'},
+  {v:169,l:'INSS LABORAL'},
+  {v:170,l:'AQUISICAO DE IMOVEIS'},
+  {v:171,l:'PRO-LABORE III'},
+  {v:172,l:'PRODUTO PARA REVENDA CONFECCAO'},
+  {v:173,l:'LANCHE DIRETORIA / ADM'},
+  {v:174,l:'ITR (IMPOSTO RURAL)'},
+  {v:175,l:'SERVICO PRESTADO A PRODUCAO'},
+  {v:176,l:'JUNTA COMERCIAL DO CEARA'},
+  {v:177,l:'INFLUENCER MARKETING'},
+  {v:178,l:'ASSESSORIA DE IMPRENSA'},
+  {v:179,l:'SERVICO DE ILHOS'},
+  {v:180,l:'FGTS RESCISORIO'},
+  {v:181,l:'AMGEV'},
+  {v:182,l:'FABRICA NOVA'},
+  {v:183,l:'PIX TOTVS'},
+];
+
+/* helper de data exibição */
+const now = () => new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+
+/* ═══════════════════════ HELPERS ═══════════════════════ */
+const R = (v) => new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(v||0);
+// Data local (Brasil) no formato YYYY-MM-DD — evita o bug de UTC avançar um dia depois das 21h
+const localDateStr = () => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+const fmtDate = () => new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+
+function reducer(state, action) {
+  switch(action.type) {
+    case 'SET':       return action.reqs;
+    case 'ADD':       return [action.req,...state];
+    case 'MARK_SENT': return state.map(r => r.id!==action.id ? r : {...r, sent_to_totvs:true});
+    case 'UPDATE': return state.map(r => r.id!==action.id ? r : {
+      ...r, status:action.status,
+      history:[...r.history,{date:fmtDate(),actor:action.actor,action:action.label,comment:action.comment||''}]
+    });
+    default: return state;
+  }
+}
+
+/* ═══════════════════════ ATOMS ═══════════════════════ */
+function Badge({status}) {
+  const s = STATUS[status]||STATUS.pending_supervisor;
+  return (
+    <span style={{background:s.bg,color:s.text}} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap">
+      <span style={{background:s.dot}} className="w-1.5 h-1.5 rounded-full flex-shrink-0"/>
+      {s.label}
+    </span>
+  );
+}
+
+function Spinner() {
+  return <svg className="spin w-5 h-5" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#C9BBAA" strokeWidth="3" strokeDasharray="60" strokeDashoffset="15"/></svg>;
+}
+
+/* ═══════════════════════ ICON SET ═══════════════════════ */
+const I = {
+  dashboard: ()=><svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>,
+  list:      ()=><svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>,
+  plus:      ()=><svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2"><path strokeLinecap="round" d="M12 4v16m8-8H4"/></svg>,
+  logout:    ()=><svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h6a2 2 0 012 2v1"/></svg>,
+  back:      ()=><svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" d="M15 19l-7-7 7-7"/></svg>,
+  upload:    ()=><svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" d="M3 16v2a2 2 0 002 2h14a2 2 0 002-2v-2M12 4v12m-4-4l4-4 4 4"/></svg>,
+  file:      ()=><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" d="M9 12h6m-6 4h6M9 8h3M5 3h11l3 3v15a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"/></svg>,
+  x:         ()=><svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" d="M6 18L18 6M6 6l12 12"/></svg>,
+  check:     ()=><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" d="M5 13l4 4L19 7"/></svg>,
+  send:      ()=><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z"/></svg>,
+  mail:      ()=><svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" d="M3 8l9 6 9-6M5 6h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2z"/></svg>,
+  chevron:   ()=><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" d="M9 5l7 7-7 7"/></svg>,
+  menu:      ()=><svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" d="M4 6h16M4 12h16M4 18h16"/></svg>,
+  alert:     ()=><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path strokeLinecap="round" d="M12 8v4m0 4h.01"/></svg>,
+  users:     ()=><svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>,
+  shield:    ()=><svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
+};
+
+/* ═══════════════════════ CHARTS ═══════════════════════ */
+function BarChart({ labels, values }) {
+  const ref = useRef(); const chart = useRef();
+  useEffect(() => {
+    if (!window.Chart || !ref.current || !labels.length) return;
+    if (chart.current) chart.current.destroy();
+    chart.current = new window.Chart(ref.current.getContext('2d'), {
+      type:'bar',
+      data:{ labels, datasets:[{ data:values, backgroundColor:'#C9BBAA', hoverBackgroundColor:'#B8A892', borderRadius:6, borderSkipped:false }] },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label:c=>R(c.raw) }, backgroundColor:'#0A0A0A', titleFont:{family:'Raleway'}, bodyFont:{family:'Raleway'} } },
+        scales:{
+          y:{ beginAtZero:true, grid:{color:'rgba(0,0,0,.05)'}, ticks:{ callback:v=>v>=1000?'R$'+(v/1000).toFixed(0)+'k':'R$'+v, color:'#999', font:{family:'Raleway',size:11} }, border:{display:false} },
+          x:{ grid:{display:false}, ticks:{color:'#888',font:{family:'Raleway',size:11}}, border:{display:false} }
+        }
+      }
+    });
+    return ()=>{ if(chart.current) chart.current.destroy(); };
+  },[labels.join(','), values.join(',')]);
+  if(!labels.length) return <div className="h-full flex items-center justify-center text-sm text-gray-400">Sem dados</div>;
+  return <canvas ref={ref}/>;
+}
+
+function DonutChart({ data }) {
+  const ref = useRef(); const chart = useRef();
+  const labels = data.map(d=>d.label), values = data.map(d=>d.value), colors = data.map(d=>d.color);
+  useEffect(() => {
+    if (!window.Chart || !ref.current || !data.length) return;
+    if (chart.current) chart.current.destroy();
+    chart.current = new window.Chart(ref.current.getContext('2d'), {
+      type:'doughnut',
+      data:{ labels, datasets:[{ data:values, backgroundColor:colors, borderWidth:0, hoverOffset:4 }] },
+      options:{
+        responsive:true, maintainAspectRatio:false, cutout:'68%',
+        plugins:{
+          legend:{ position:'bottom', labels:{ color:'#666', font:{family:'Raleway',size:11}, padding:12, boxWidth:10, boxHeight:10, usePointStyle:true } },
+          tooltip:{ backgroundColor:'#0A0A0A', titleFont:{family:'Raleway'}, bodyFont:{family:'Raleway'} }
+        }
+      }
+    });
+    return ()=>{ if(chart.current) chart.current.destroy(); };
+  },[JSON.stringify(data)]);
+  if(!data.length) return <div className="h-full flex items-center justify-center text-sm text-gray-400">Sem dados</div>;
+  return <canvas ref={ref}/>;
+}
+
+/* ═══════════════════════ SIDEBAR ═══════════════════════ */
+function Sidebar({ user, view, setView, onLogout, onNewRequest, mobileOpen, onClose }) {
+  const nav = [
+    { id:'dashboard', label:'Dashboard',     icon:I.dashboard, roles:['supervisora','dono','admin'] },
+    { id:'requests',  label:'Solicitações',  icon:I.list,      roles:['solicitante','supervisora','dono','financeiro','admin'] },
+    { id:'admin',     label:'Usuários',      icon:I.shield,    roles:['admin'] },
+  ];
+  const visible = nav.filter(n => n.roles.includes(user.role));
+
+  const content = (
+    <div className="flex flex-col h-full">
+      {/* Logo */}
+      <div className="px-6 pt-8 pb-6 border-b border-white/5">
+        <div style={{fontFamily:'Raleway,sans-serif',fontWeight:200,letterSpacing:'0.45em',fontSize:'20px',color:'#C9BBAA'}}>DEEP</div>
+        <div style={{color:'#4A4A4A',fontSize:'10px',letterSpacing:'0.18em',marginTop:'3px',fontWeight:500}}>GRUPO DEEP</div>
+      </div>
+
+      {/* Nav */}
+      <nav className="flex-1 px-3 py-4 space-y-0.5">
+        {visible.map(n=>(
+          <button key={n.id} onClick={()=>{setView(n.id);if(onClose)onClose();}}
+            className={`nav-link w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium ${view===n.id?'active':''}`}
+            style={{color: view===n.id?'#C9BBAA':'#666'}}>
+            <n.icon/> {n.label}
+          </button>
+        ))}
+
+        {user.role==='solicitante' && (
+          <button onClick={()=>{setView('new');if(onClose)onClose();}}
+            className="nav-link w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mt-3"
+            style={{color:'#C9BBAA',border:'1px solid rgba(201,187,170,.3)'}}>
+            <I.plus/> Nova Solicitação
+          </button>
+        )}
+
+        {(user.role==='supervisora'||user.role==='dono') && (
+          <button onClick={()=>{setView('new');if(onClose)onClose();}}
+            className="nav-link w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mt-3"
+            style={{color:'#C9BBAA',border:'1px solid rgba(201,187,170,.3)'}}>
+            <I.plus/> Nova Solicitação
+          </button>
+        )}
+      </nav>
+
+      {/* User */}
+      <div className="px-4 pb-6 border-t border-white/5 pt-4">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+            style={{background:'rgba(201,187,170,.2)',color:'#C9BBAA'}}>
+            {user.name.split(' ').map(w=>w[0]).slice(0,2).join('')}
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-medium truncate" style={{color:'#D4D4D4'}}>{user.name}</p>
+            <p className="text-xs truncate" style={{color:'#555'}}>{ROLE_LABELS[user.role]}</p>
+          </div>
+        </div>
+        <button onClick={onLogout}
+          className="nav-link w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium"
+          style={{color:'#555'}}>
+          <I.logout/> Sair
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      {/* Desktop sidebar */}
+      <aside className="hidden md:flex flex-col fixed left-0 top-0 bottom-0 w-56 z-30"
+        style={{background:'#0A0A0A'}}>
+        {content}
+      </aside>
+
+      {/* Mobile overlay */}
+      {mobileOpen && (
+        <div className="md:hidden fixed inset-0 z-40 overlay">
+          <div className="absolute inset-0 bg-black/60" onClick={onClose}/>
+          <aside className="relative w-56 h-full slide-up" style={{background:'#0A0A0A'}}>
+            {content}
+          </aside>
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ═══════════════════════ LOGIN ═══════════════════════ */
+function LoginPage({ onLogin }) {
+  const [email,setEmail]=useState('');
+  const [pw,setPw]=useState('');
+  const [err,setErr]=useState('');
+  const [loading,setLoading]=useState(false);
+
+  const go = async () => {
+    if(!email.trim()||!pw.trim()){setErr('Preencha email e senha');return;}
+    setLoading(true); setErr('');
+    try {
+      const rows = await sbSelect('profiles',
+        `?email=eq.${encodeURIComponent(email.trim().toLowerCase())}&password=eq.${encodeURIComponent(pw)}&is_active=eq.true&limit=1`);
+      if(!rows||rows.length===0){setErr('Email ou senha incorretos');setLoading(false);return;}
+      onLogin(rows[0]);
+    } catch(e){setErr('Erro ao conectar. Tente novamente.');setLoading(false);}
+  };
+
+  const inp = 'w-full px-4 py-2.5 rounded-xl text-sm transition';
+  const is = {background:'#1C1C1C',border:'1px solid #2A2A2A',color:'#D4D4D4'};
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6" style={{background:'#0A0A0A'}}>
+      <div className="w-full max-w-sm fade">
+        <div className="text-center mb-10">
+          <div style={{fontFamily:'Raleway,sans-serif',fontWeight:200,letterSpacing:'0.55em',fontSize:'32px',color:'#C9BBAA'}}>DEEP</div>
+          <div style={{color:'#444',fontSize:'11px',letterSpacing:'0.2em',marginTop:'4px',fontWeight:500}}>GRUPO DEEP</div>
+          <div style={{color:'#555',fontSize:'12px',marginTop:'16px'}}>Sistema de Pagamentos</div>
+        </div>
+        <div className="rounded-2xl p-6" style={{background:'#131313',border:'1px solid #222'}}>
+          <p className="text-sm font-semibold mb-4" style={{color:'#888',letterSpacing:'0.05em'}}>ACESSO</p>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium mb-1.5" style={{color:'#666',letterSpacing:'0.05em'}}>EMAIL</label>
+              <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="seu@grupodeep.com.br"
+                className={inp} style={is}
+                onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor='#2A2A2A'}/>
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1.5" style={{color:'#666',letterSpacing:'0.05em'}}>SENHA</label>
+              <input type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="••••••"
+                onKeyDown={e=>e.key==='Enter'&&go()}
+                className={inp} style={is}
+                onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor='#2A2A2A'}/>
+            </div>
+            {err&&<div className="flex items-center gap-2 text-xs rounded-lg px-3 py-2" style={{background:'#2A1515',color:'#EF4444'}}><I.alert/>{err}</div>}
+            <button onClick={go} disabled={loading}
+              className="w-full py-2.5 rounded-xl text-sm font-semibold mt-1 transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-60"
+              style={{background:'#C9BBAA',color:'#0A0A0A'}}>
+              {loading?<><Spinner/>Entrando...</>:'Entrar'}
+            </button>
+          </div>
+        </div>
+
+        {/* Atalhos de teste */}
+        <div className="mt-4 pt-4" style={{borderTop:'1px solid #1A1A1A'}}>
+          <p className="text-xs text-center mb-2" style={{color:'#333',letterSpacing:'0.05em'}}>ACESSO RÁPIDO</p>
+          <div className="flex flex-col gap-2">
+            {[
+              {label:'Admin',       email:'admin@grupodeep.com.br',        pw:'admin123'},
+              {label:'Dono',        email:'dono@grupodeep.com.br',         pw:'123456'},
+              {label:'Supervisora', email:'supervisora@grupodeep.com.br',  pw:'123456'},
+              {label:'Solicitante', email:'solicitante@grupodeep.com.br',  pw:'123456'},
+            ].map(u=>(
+              <button key={u.email} type="button"
+                onClick={()=>{setEmail(u.email);setPw(u.pw);}}
+                className="w-full py-2.5 rounded-xl text-xs font-semibold flex items-center justify-between px-4 active:scale-95 transition-transform"
+                style={{background:'#111',color:'#555',border:'1px solid #1E1E1E'}}>
+                <span style={{color:'#666'}}>{u.label}</span>
+                <span>{u.email}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════ DASHBOARD ═══════════════════════ */
+function DashboardView({ user, requests }) {
+  const base = user.role==='dono' ? requests.filter(r=>r.status!=='pending_supervisor') : requests;
+
+  const total = base.length;
+  const totalValue = base.reduce((s,r)=>s+r.amount,0);
+  const pending = base.filter(r=>
+    (user.role==='supervisora'&&r.status==='pending_supervisor')||
+    (user.role==='dono'&&r.status==='pending_owner')
+  ).length;
+  const sent = base.filter(r=>['pending_payment','completed'].includes(r.status)).length;
+
+  // Bar chart: valor por categoria
+  const byCat = CATEGORIES.map(cat=>({
+    label: cat, value: base.filter(r=>r.category===cat).reduce((s,r)=>s+r.amount,0)
+  })).filter(c=>c.value>0);
+
+  // Donut: por status
+  const byStatus = Object.entries(STATUS).map(([k,s])=>({
+    label:s.label, value:base.filter(r=>r.status===k).length, color:CHART_COLORS[k]
+  })).filter(s=>s.value>0);
+
+  const KPI = ({label,value,sub,accent}) => (
+    <div className="rounded-2xl p-5" style={{background:'#fff',border:'1px solid #EDE8E3'}}>
+      <p className="text-xs font-semibold mb-3" style={{color:'#999',letterSpacing:'0.07em'}}>{label}</p>
+      <p className="text-2xl font-bold" style={{color:accent||'#1A1A1A'}}>{value}</p>
+      {sub && <p className="text-xs mt-1" style={{color:'#AAA'}}>{sub}</p>}
+    </div>
+  );
+
+  return (
+    <div className="fade">
+      <div className="mb-6">
+        <h1 className="text-xl font-bold" style={{color:'#1A1A1A'}}>Dashboard</h1>
+        <p className="text-sm mt-0.5" style={{color:'#888'}}>Visão geral das solicitações de pagamento</p>
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <KPI label="TOTAL DE SOLICITAÇÕES" value={total} sub="todos os status"/>
+        <KPI label="VALOR TOTAL" value={R(totalValue)} sub="soma das solicitações" accent="#C9BBAA"/>
+        <KPI label="PENDENTES DE AÇÃO" value={pending} sub={user.role==='supervisora'?'aguardando sua revisão':'aguardando sua aprovação'} accent="#F59E0B"/>
+        <KPI label="ENVIADOS P/ PAGAMENTO" value={sent} sub="aprovados pelo dono" accent="#8B5CF6"/>
+      </div>
+
+      {/* Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        <div className="lg:col-span-3 rounded-2xl p-5" style={{background:'#fff',border:'1px solid #EDE8E3'}}>
+          <p className="text-sm font-bold mb-1" style={{color:'#1A1A1A'}}>Valor por Categoria</p>
+          <p className="text-xs mb-4" style={{color:'#AAA'}}>Total em R$ por categoria de despesa</p>
+          <div className="chart-wrap">
+            <BarChart labels={byCat.map(c=>c.label)} values={byCat.map(c=>c.value)}/>
+          </div>
+        </div>
+
+        <div className="lg:col-span-2 rounded-2xl p-5" style={{background:'#fff',border:'1px solid #EDE8E3'}}>
+          <p className="text-sm font-bold mb-1" style={{color:'#1A1A1A'}}>Status das Solicitações</p>
+          <p className="text-xs mb-4" style={{color:'#AAA'}}>Distribuição por etapa do fluxo</p>
+          <div className="chart-wrap">
+            <DonutChart data={byStatus}/>
+          </div>
+        </div>
+      </div>
+
+      {/* Recent */}
+      <div className="mt-4 rounded-2xl p-5" style={{background:'#fff',border:'1px solid #EDE8E3'}}>
+        <p className="text-sm font-bold mb-4" style={{color:'#1A1A1A'}}>Últimas Solicitações</p>
+        <div className="space-y-2">
+          {base.slice(0,5).map(r=>(
+            <div key={r.id} className="flex items-center justify-between gap-4 py-2 border-b last:border-0" style={{borderColor:'#F5F0EB'}}>
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate" style={{color:'#1A1A1A'}}>{r.title}</p>
+                <p className="text-xs" style={{color:'#AAA'}}>{r.solicitanteName} · {r.category}</p>
+              </div>
+              <div className="flex items-center gap-3 flex-shrink-0">
+                <span className="text-sm font-bold" style={{color:'#C9BBAA'}}>{R(r.amount)}</span>
+                <Badge status={r.status}/>
+              </div>
+            </div>
+          ))}
+          {!base.length && <p className="text-sm text-center py-4" style={{color:'#AAA'}}>Nenhuma solicitação ainda</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════ FORM NOVA SOLICITAÇÃO ═══════════════════════ */
+function NewRequestForm({ user, requests, onSubmit, onBack }) {
+  // Filtra opções por permissões do usuário ([] = todas liberadas)
+  const allowedExpenses = user.allowed_expense_codes?.length > 0
+    ? EXPENSE_TYPES.filter(e => user.allowed_expense_codes.includes(e.v))
+    : EXPENSE_TYPES;
+  const allowedDocs = user.allowed_document_types?.length > 0
+    ? DOCUMENT_TYPES.filter(d => user.allowed_document_types.includes(d.v))
+    : DOCUMENT_TYPES;
+
+  const [title,setTitle]           = useState('');
+  const [desc,setDesc]             = useState('');
+  const [amount,setAmount]         = useState('');
+  const [category,setCategory]     = useState('');
+  const [dueDate,setDueDate]       = useState(()=>{ const d=new Date(Date.now()+7*864e5); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; });
+  const [document,setDocument]     = useState(()=>allowedDocs[0]?.v||15);
+  const [expenseCode,setExpCode]   = useState(()=>allowedExpenses.length===1?allowedExpenses[0].v:'');
+  const [rateio,setRateio]         = useState(100);
+  const [parcelas,setParcelas]     = useState(1);
+  const [receipts,setReceipts]     = useState([]);
+  const [errors,setErrors]         = useState({});
+  const [loading,setLoading]       = useState(false);
+  const fileRef = useRef();
+
+  // Gera código de duplicata automático: AAAAMMDD + sequencial do dia (usa data local)
+  const genDuplicateCode = () => {
+    const today = new Date();
+    const ymd = today.getFullYear().toString()
+      + String(today.getMonth()+1).padStart(2,'0')
+      + String(today.getDate()).padStart(2,'0'); // getFullYear/Month/Date = hora local, não UTC
+    // Conta quantas solicitações de hoje já existem
+    const todayStr = today.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'});
+    const seq = (requests||[]).filter(r=>r.created_at?.startsWith(todayStr)).length + 1;
+    return parseInt(ymd + String(seq));
+  };
+
+  const handleFiles = e => {
+    Array.from(e.target.files).forEach(f=>{
+      const r=new FileReader();
+      r.onload=ev=>setReceipts(p=>[...p,{name:f.name,data:ev.target.result,type:f.type}]);
+      r.readAsDataURL(f);
+    });
+    e.target.value='';
+  };
+
+  const validate = () => {
+    const e={};
+    if(!title.trim())  e.title  = 'Obrigatório';
+    if(!desc.trim())   e.desc   = 'Obrigatório';
+    if(!amount||isNaN(parseFloat(amount.replace(',','.')))) e.amount = 'Valor inválido';
+    if(!category)      e.category = 'Selecione';
+    if(!dueDate)       e.dueDate  = 'Obrigatório';
+    if(!expenseCode)   e.expenseCode = 'Obrigatório';
+    if(!receipts.length) e.receipts = 'Anexe ao menos um recibo';
+    return e;
+  };
+
+  const submit = () => {
+    const e=validate(); if(Object.keys(e).length){setErrors(e);return;}
+    setLoading(true);
+    const today = localDateStr();
+    setTimeout(()=>onSubmit({
+      id: String(Date.now()),
+      title: title.trim(),
+      description: desc.trim(),
+      amount: parseFloat(amount.replace(',','.')),
+      category, receipts,
+      totvs: {
+        supplierCpfCnpj:    '28171353000173',
+        duplicateCode:      genDuplicateCode(),
+        bearerCode:         1020,
+        issueDate:          today,
+        dueDate:            dueDate,
+        arrivalDate:        today,
+        document:           parseInt(document),
+        prevision:          2,
+        stage:              1,
+        expenseCode:        parseInt(expenseCode),
+        costCenterCode:     1,
+        proratedPercentage: parseFloat(rateio)||100,
+        observation:        desc.trim(),
+        parcelas:           parseInt(parcelas)||1,
+      },
+      status:'pending_supervisor', solicitanteId:user.id, solicitanteName:user.name,
+      created_at: fmtDate(),
+      history:[{date:fmtDate(),actor:user.name,action:'Solicitação criada e enviada para revisão da supervisora',comment:''}]
+    }),400);
+  };
+
+  const F  = 'w-full px-3 py-2.5 rounded-xl text-sm transition';
+  const FS = (err)=>({background:'#FAFAF8',border:`1px solid ${err?'#EF4444':'#E0D9D0'}`,color:'#1A1A1A'});
+  const onF = e=>e.target.style.borderColor='#C9BBAA';
+  const onB = (err)=>e=>e.target.style.borderColor=err?'#EF4444':'#E0D9D0';
+  const Lbl = ({children,err})=>(
+    <label className="block text-xs font-semibold mb-1.5" style={{color:'#888',letterSpacing:'0.06em'}}>
+      {children}{err&&<span style={{color:'#EF4444'}}> *</span>}
+    </label>
+  );
+  const Err = ({msg})=>msg?<p className="text-xs mt-1" style={{color:'#EF4444'}}>{msg}</p>:null;
+
+  return (
+    <div className="max-w-2xl fade">
+      <div className="flex items-center gap-3 mb-6">
+        <button onClick={onBack} className="p-2 rounded-xl transition" style={{background:'#fff',border:'1px solid #EDE8E3'}}
+          onMouseEnter={e=>e.currentTarget.style.borderColor='#C9BBAA'} onMouseLeave={e=>e.currentTarget.style.borderColor='#EDE8E3'}>
+          <I.back/>
+        </button>
+        <div>
+          <h1 className="text-xl font-bold" style={{color:'#1A1A1A'}}>Nova Solicitação</h1>
+          <p className="text-xs" style={{color:'#888'}}>Preencha os dados da despesa</p>
+        </div>
+      </div>
+
+      <div className="rounded-2xl p-6 space-y-4 mb-4" style={{background:'#fff',border:'1px solid #EDE8E3'}}>
+
+        {/* Título */}
+        <div>
+          <Lbl err>TÍTULO</Lbl>
+          <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Ex: Almoço reunião com cliente"
+            className={F} style={FS(errors.title)} onFocus={onF} onBlur={onB(errors.title)}/>
+          <Err msg={errors.title}/>
+        </div>
+
+        {/* Valor + Categoria */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Lbl err>VALOR (R$)</Lbl>
+            <input value={amount} onChange={e=>setAmount(e.target.value)} placeholder="0,00"
+              className={F} style={FS(errors.amount)} onFocus={onF} onBlur={onB(errors.amount)}/>
+            <Err msg={errors.amount}/>
+          </div>
+          <div>
+            <Lbl err>CATEGORIA</Lbl>
+            <select value={category} onChange={e=>setCategory(e.target.value)}
+              className={F} style={{...FS(errors.category),appearance:'none'}} onFocus={onF} onBlur={onB(errors.category)}>
+              <option value="">Selecionar...</option>
+              {CATEGORIES.map(c=><option key={c}>{c}</option>)}
+            </select>
+            <Err msg={errors.category}/>
+          </div>
+        </div>
+
+        {/* Parcelas + Data de vencimento da 1ª */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Lbl err>DATA 1º VENCIMENTO</Lbl>
+            <input type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}
+              className={F} style={FS(errors.dueDate)} onFocus={onF} onBlur={onB(errors.dueDate)}/>
+            <Err msg={errors.dueDate}/>
+          </div>
+          <div>
+            <Lbl>PARCELAS</Lbl>
+            <select value={parcelas} onChange={e=>setParcelas(e.target.value)}
+              className={F} style={{...FS(false),appearance:'none'}} onFocus={onF} onBlur={onB(false)}>
+              {[1,2,3,4,5,6,7,8,9,10,11,12].map(n=><option key={n} value={n}>{n}x</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Preview das parcelas */}
+        {parcelas>1 && amount && !isNaN(parseFloat(amount.replace(',','.'))) && (()=>{
+          const total = parseFloat(amount.replace(',','.'));
+          const n = parseInt(parcelas);
+          const valParcela = total / n;
+          const firstDue = new Date(dueDate+'T12:00:00');
+          return (
+            <div className="rounded-xl p-3 space-y-1.5" style={{background:'#F7F3EE',border:'1px solid #EDE8E3'}}>
+              <p className="text-xs font-bold mb-2" style={{color:'#AAA',letterSpacing:'0.06em'}}>PRÉVIA DAS PARCELAS</p>
+              {Array.from({length:n},(_,i)=>{
+                const d = new Date(firstDue); d.setDate(d.getDate()+(i*30));
+                return (
+                  <div key={i} className="flex items-center justify-between text-xs">
+                    <span style={{color:'#888'}}>Parcela {i+1}</span>
+                    <div className="flex items-center gap-3">
+                      <span style={{color:'#666'}}>{d.toLocaleDateString('pt-BR')}</span>
+                      <span className="font-bold" style={{color:'#C9BBAA'}}>{R(valParcela)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+
+        {/* Tipo documento + Cód. Despesa + Rateio */}
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <Lbl>TIPO DE DOCUMENTO</Lbl>
+            <select value={document} onChange={e=>setDocument(e.target.value)}
+              className={F} style={{...FS(false),appearance:'none'}} onFocus={onF} onBlur={onB(false)}>
+              {allowedDocs.map(d=><option key={d.v} value={d.v}>{d.v} — {d.l}</option>)}
+            </select>
+          </div>
+          <div>
+            <Lbl err>DESPESA</Lbl>
+            <select value={expenseCode} onChange={e=>setExpCode(e.target.value)}
+              className={F} style={{...FS(errors.expenseCode),appearance:'none'}} onFocus={onF} onBlur={onB(errors.expenseCode)}>
+              <option value="">Selecionar...</option>
+              {allowedExpenses.map(d=><option key={d.v} value={d.v}>{d.v} — {d.l}</option>)}
+            </select>
+            <Err msg={errors.expenseCode}/>
+          </div>
+          <div>
+            <Lbl>% RATEIO</Lbl>
+            <input type="number" min="0" max="100" value={rateio} onChange={e=>setRateio(e.target.value)}
+              className={F} style={FS(false)} onFocus={onF} onBlur={onB(false)}/>
+          </div>
+        </div>
+
+        {/* Descrição / Observação */}
+        <div>
+          <Lbl err>DESCRIÇÃO / OBSERVAÇÃO</Lbl>
+          <textarea value={desc} onChange={e=>setDesc(e.target.value)} rows={3}
+            placeholder="Descreva o motivo, fornecedor e detalhes da despesa..."
+            className={F+' resize-none'} style={FS(errors.desc)} onFocus={onF} onBlur={onB(errors.desc)}/>
+          <Err msg={errors.desc}/>
+        </div>
+
+        {/* Recibos */}
+        <div>
+          <Lbl err>RECIBOS / COMPROVANTES</Lbl>
+          <div onClick={()=>fileRef.current.click()}
+            className="flex flex-col items-center justify-center py-5 rounded-xl cursor-pointer transition"
+            style={{border:`2px dashed ${errors.receipts?'#EF4444':'#D4C5B0'}`,background:'#FAFAF8'}}
+            onMouseEnter={e=>e.currentTarget.style.borderColor=errors.receipts?'#EF4444':'#B8A892'}
+            onMouseLeave={e=>e.currentTarget.style.borderColor=errors.receipts?'#EF4444':'#D4C5B0'}>
+            <div style={{color:'#C9BBAA'}}><I.upload/></div>
+            <p className="text-sm font-medium mt-2" style={{color:'#888'}}>Clique para anexar</p>
+            <p className="text-xs mt-0.5" style={{color:'#BBB'}}>JPG, PNG ou PDF</p>
+          </div>
+          <input ref={fileRef} type="file" accept="image/*,.pdf" multiple onChange={handleFiles} style={{display:'none'}}/>
+          <Err msg={errors.receipts}/>
+          {receipts.length>0&&(
+            <div className="mt-2 space-y-1.5">
+              {receipts.map((r,i)=>(
+                <div key={i} className="flex items-center gap-2.5 rounded-xl px-3 py-2" style={{background:'#F7F3EE',border:'1px solid #EDE8E3'}}>
+                  {r.type?.startsWith('image')?<img src={r.data} alt="" className="w-8 h-8 object-cover rounded-lg"/>:<div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{background:'#E8DDD0',color:'#B8A892'}}><I.file/></div>}
+                  <span className="flex-1 text-xs truncate" style={{color:'#666'}}>{r.name}</span>
+                  <button onClick={()=>setReceipts(p=>p.filter((_,j)=>j!==i))} className="transition" style={{color:'#BBB'}} onMouseEnter={e=>e.currentTarget.style.color='#EF4444'} onMouseLeave={e=>e.currentTarget.style.color='#BBB'}><I.x/></button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+      </div>
+
+      {/* Botões */}
+      <div className="flex gap-3">
+        <button onClick={onBack} className="flex-1 py-3 rounded-xl text-sm font-medium transition"
+          style={{border:'1px solid #E0D9D0',color:'#666',background:'#fff'}}
+          onMouseEnter={e=>e.currentTarget.style.borderColor='#C9BBAA'} onMouseLeave={e=>e.currentTarget.style.borderColor='#E0D9D0'}>
+          Cancelar
+        </button>
+        <button onClick={submit} disabled={loading}
+          className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-60"
+          style={{background:'#0A0A0A',color:'#C9BBAA'}}>
+          {loading?<><Spinner/>Enviando...</>:'Enviar para Revisão'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════ TOTVS PAYLOAD BUILDER ═══════════════════════ */
+function buildTotvsPayload(req) {
+  const t = req.totvs || {};
+  const n = parseInt(t.parcelas)||1;
+  const valParcela = Math.round((req.amount / n) * 100) / 100;
+  const issueDate   = new Date((t.issueDate  ||localDateStr())+'T00:00:00Z').toISOString();
+  const arrivalDate = new Date((t.arrivalDate||localDateStr())+'T00:00:00Z').toISOString();
+  const firstDue    = new Date((t.dueDate    ||localDateStr())+'T00:00:00Z');
+  return {
+    branchCnpj:      TOTVS_BRANCH_CNPJ,
+    duplicateCode:   t.duplicateCode,
+    supplierCpfCnpj: String(t.supplierCpfCnpj||'').replace(/\D/g,''),
+    installments: Array.from({length:n},(_,i)=>{
+      const due=new Date(firstDue); due.setDate(due.getDate()+(i*30));
+      return {
+        installmentCode: i+1, bearerCode:t.bearerCode,
+        issueDate, dueDate:due.toISOString(), arrivalDate,
+        document:t.document, duplicateValue:valParcela,
+        prevision:t.prevision, stage:t.stage,
+        expenses:[{expenseCode:t.expenseCode,costCenterCode:t.costCenterCode,proratedPercentage:t.proratedPercentage||100}],
+        ...(t.observation?{observations:[{observation:t.observation}]}:{}),
+      };
+    }),
+  };
+}
+
+/* ═══════════════════════ REQUEST DETAIL ═══════════════════════ */
+function RequestDetail({ req, user, onBack, dispatch, showToast }) {
+  const [modal,setModal]=useState(null);
+  const [comment,setComment]=useState('');
+  const [lightbox,setLightbox]=useState(null);
+  const [totvsLoading, setTotvsLoading] = useState(false);
+  const [totvsResult,  setTotvsResult]  = useState(null);
+
+  const isSup=user.role==='supervisora', isDono=user.role==='dono', isFinanceiro=user.role==='financeiro';
+  const canActSup  = isSup  && req.status==='pending_supervisor';
+  const canActDono = isDono && req.status==='pending_owner';
+  const canActFin  = isFinanceiro && req.status==='pending_payment';
+
+  const approve = () => {
+    dispatch({type:'UPDATE',id:req.id,status:'pending_owner',actor:user.name,label:'Aprovado pela supervisora — enviado para aprovação do dono',comment});
+    showToast('Solicitação aprovada e enviada ao dono!','ok'); onBack();
+  };
+  const reject = () => {
+    if(!comment.trim())return;
+    if(isDono){
+      dispatch({type:'UPDATE',id:req.id,status:'returned_supervisor',actor:user.name,
+        label:'Recusado pelo dono — devolvido para supervisora e solicitante',comment});
+    } else {
+      dispatch({type:'UPDATE',id:req.id,status:'rejected',actor:user.name,label:'Recusado pela supervisora',comment});
+    }
+    showToast('Solicitação recusada.','err'); onBack();
+  };
+
+  const t = req.totvs || {};
+  const buildPayload = () => buildTotvsPayload(req);
+
+  const callTotvs = async () => {
+    setTotvsLoading('auth'); setTotvsResult(null);
+    try {
+      // 1. Busca token fresco (expira a cada 5h)
+      const authBody = new URLSearchParams({
+        Grant_type:    'password',
+        Client_id:     'deepapiv2',
+        Client_secret: '4270929817',
+        Username:      'ECOMM',
+        Password:      '1995',
+      });
+      const authRes = await fetch('https://www30.bhan.com.br:9443/api/totvsmoda/authorization/v2/token', {
+        method: 'POST',
+        headers: {'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'},
+        body: authBody,
+      });
+      if(!authRes.ok) {
+        const d = await authRes.json().catch(()=>({}));
+        throw new Error(`Falha na autenticação (${authRes.status}): ${d.message||d.error||authRes.statusText}`);
+      }
+      const authData = await authRes.json();
+      const token = authData.access_token || authData.token || authData.accessToken;
+      if(!token) throw new Error('Token não encontrado na resposta de autenticação.');
+
+      // 2. Envia duplicata com token fresco
+      setTotvsLoading('sending');
+      const res = await fetch(TOTVS_API, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','Accept':'application/json','Authorization':`Bearer ${token}`},
+        body: JSON.stringify(buildPayload()),
+      });
+      if(res.ok){
+        // Marca como enviado no banco e atualiza status automaticamente — sem segundo clique
+        dispatch({type:'MARK_SENT', id:req.id});
+        sbUpdate('requests',{sent_to_totvs:true},`?id=eq.${req.id}`).catch(()=>{});
+        setTotvsLoading(false);
+        finalizePay();
+        return;
+      } else {
+        let msg=`Erro ${res.status}`;
+        let detail='';
+        try {
+          const d=await res.json();
+          if(Array.isArray(d))   msg = d[0]?.message || msg;
+          else                   msg = d.message||d.title||d.detail||d.error||msg;
+          if(d.errors)           detail=JSON.stringify(d.errors,null,2);
+          else if(d.details)     detail=JSON.stringify(d.details,null,2);
+          else if(typeof d==='object') detail=JSON.stringify(d,null,2);
+        } catch{}
+        setTotvsResult({ok:false, msg, detail});
+      }
+    } catch(e){
+      const isCors = e.name==='TypeError'||e.message?.toLowerCase().includes('fetch')||e.message?.toLowerCase().includes('network');
+      setTotvsResult({
+        ok:false, cors:isCors,
+        msg: isCors
+          ? 'Não foi possível conectar ao servidor TOTVS (CORS/rede). Em produção, use um proxy reverso no Easypanel.'
+          : e.message,
+      });
+    }
+    setTotvsLoading(false);
+  };
+
+  const finalizePay = () => {
+    dispatch({type:'UPDATE',id:req.id,status:'pending_payment',actor:user.name,
+      label:'Aprovado pelo dono — lançado no sistema de contas a pagar (TOTVS)',comment:''});
+    showToast('Lançado no contas a pagar!','ok'); onBack();
+  };
+
+  const DOTS=['#C9BBAA','#8B7355','#3B82F6','#22C55E','#EF4444','#8B5CF6'];
+
+  return (
+    <div className="max-w-2xl fade">
+      <div className="flex items-center gap-3 mb-6">
+        <button onClick={onBack} className="p-2 rounded-xl transition" style={{background:'#fff',border:'1px solid #EDE8E3'}} onMouseEnter={e=>e.currentTarget.style.borderColor='#C9BBAA'} onMouseLeave={e=>e.currentTarget.style.borderColor='#EDE8E3'}><I.back/></button>
+        <div className="flex-1">
+          <h1 className="text-xl font-bold" style={{color:'#1A1A1A'}}>Detalhes da Solicitação</h1>
+        </div>
+        <Badge status={req.status}/>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Left: info + actions */}
+        <div className="lg:col-span-2 space-y-4">
+          <div className="rounded-2xl p-6" style={{background:'#fff',border:'1px solid #EDE8E3'}}>
+            <h2 className="text-lg font-bold mb-5" style={{color:'#1A1A1A'}}>{req.title}</h2>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              {[['VALOR',<span style={{color:'#C9BBAA',fontWeight:700,fontSize:'18px'}}>{R(req.amount)}</span>],
+                ['CATEGORIA',req.category],['SOLICITANTE',req.solicitanteName],['DATA',req.created_at]
+              ].map(([l,v])=>(
+                <div key={l}>
+                  <p className="text-xs font-semibold mb-1" style={{color:'#AAA',letterSpacing:'0.07em'}}>{l}</p>
+                  <div className="font-medium" style={{color:'#1A1A1A'}}>{v}</div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 pt-4" style={{borderTop:'1px solid #F0EBE5'}}>
+              <p className="text-xs font-semibold mb-1.5" style={{color:'#AAA',letterSpacing:'0.07em'}}>DESCRIÇÃO</p>
+              <p className="text-sm leading-relaxed" style={{color:'#555'}}>{req.description}</p>
+            </div>
+          </div>
+
+          {/* TOTVS data — read-only (apenas campos relevantes) */}
+          {req.totvs && (
+            <div className="rounded-2xl p-5" style={{background:'#fff',border:'1px solid #EDE8E3'}}>
+              <div className="flex items-center gap-2 mb-4">
+                <p className="text-xs font-bold" style={{color:'#AAA',letterSpacing:'0.07em'}}>INFORMAÇÕES FINANCEIRAS</p>
+                <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{background:'#F7F3EE',color:'#C9BBAA'}}>TOTVS</span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                {[
+                  ['Cód. Duplicata',   req.totvs.duplicateCode],
+                  ['Parcelas',         `${req.totvs.parcelas||1}x de ${R((req.amount||0)/(req.totvs.parcelas||1))}`],
+                  ['1º Vencimento',    req.totvs.dueDate],
+                  ['Tipo Documento',   (()=>{ const d=DOCUMENT_TYPES.find(x=>x.v==req.totvs.document); return d?`${d.v} — ${d.l}`:'—'; })()],
+                  ['Despesa',          (()=>{ const d=EXPENSE_TYPES.find(x=>x.v==req.totvs.expenseCode); return d?`${d.v} — ${d.l}`:(req.totvs.expenseCode||'—'); })()],
+                  ['% Rateio',         (req.totvs.proratedPercentage||100)+'%'],
+                ].map(([l,v])=>(
+                  <div key={l}>
+                    <p className="text-xs" style={{color:'#AAA'}}>{l}</p>
+                    <p className="text-sm font-semibold mt-0.5" style={{color:'#1A1A1A'}}>{v||'—'}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Receipts */}
+          {req.receipts.length>0&&(
+            <div className="rounded-2xl p-5" style={{background:'#fff',border:'1px solid #EDE8E3'}}>
+              <p className="text-xs font-semibold mb-3" style={{color:'#AAA',letterSpacing:'0.07em'}}>RECIBOS ANEXADOS ({req.receipts.length})</p>
+              <div className="grid grid-cols-4 gap-2">
+                {req.receipts.map((r,i)=>(
+                  r.type?.startsWith('image')&&r.data?(
+                    <div key={i} onClick={()=>setLightbox(r)} className="rounded-xl overflow-hidden cursor-pointer aspect-square hover:opacity-80 transition" style={{border:'1px solid #EDE8E3'}}>
+                      <img src={r.data} alt="" className="w-full h-full object-cover"/>
+                    </div>
+                  ):(
+                    <div key={i} className="rounded-xl aspect-square flex flex-col items-center justify-center gap-1 p-2" style={{background:'#F7F3EE',border:'1px solid #EDE8E3'}}>
+                      <span style={{color:'#C9BBAA'}}><I.file/></span>
+                      <span className="text-xs text-center truncate w-full" style={{color:'#888',fontSize:'10px'}}>{r.name}</span>
+                    </div>
+                  )
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
+          {(canActSup||canActDono)&&(
+            <div className="flex gap-2">
+              <button onClick={()=>{setComment('');setModal('reject');}} className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95" style={{border:'2px solid #FECACA',color:'#DC2626',background:'#FEF2F2'}} onMouseEnter={e=>e.currentTarget.style.background='#FEE2E2'} onMouseLeave={e=>e.currentTarget.style.background='#FEF2F2'}>
+                Recusar
+              </button>
+              {canActSup&&(
+                <button onClick={()=>{setComment('');setModal('approve');}} className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95" style={{background:'#0A0A0A',color:'#C9BBAA'}}>
+                  Aprovar
+                </button>
+              )}
+              {canActDono&&(
+                <button onClick={()=>{
+                  setModal('payment');
+                  // Se já foi enviado ao TOTVS antes, pula direto para confirmar
+                  if(req.sent_to_totvs) setTotvsResult({ok:true, warn:true, msg:'Lançamento já registrado no TOTVS. Confirme para atualizar o status.'});
+                  else setTotvsResult(null);
+                }} className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95 flex items-center justify-center gap-1.5" style={{background:'#0A0A0A',color:'#C9BBAA'}}>
+                  <I.send/> {req.sent_to_totvs?'Confirmar Pagamento':'Enviar p/ Pagamento'}
+                </button>
+              )}
+            </div>
+          )}
+          {canActFin&&(
+            <button onClick={()=>{
+              dispatch({type:'UPDATE',id:req.id,status:'completed',actor:user.name,label:'Pagamento confirmado pelo financeiro',comment:''});
+              showToast('Pagamento marcado como concluído!','ok'); onBack();
+            }} className="w-full py-3 rounded-xl text-sm font-semibold transition-all active:scale-95 flex items-center justify-center gap-2"
+              style={{background:'#15803D',color:'#fff'}}>
+              <I.check/> Marcar como Pago
+            </button>
+          )}
+        </div>
+
+        {/* Right: history */}
+        <div className="rounded-2xl p-5" style={{background:'#fff',border:'1px solid #EDE8E3'}}>
+          <p className="text-xs font-semibold mb-4" style={{color:'#AAA',letterSpacing:'0.07em'}}>HISTÓRICO</p>
+          <div className="space-y-0">
+            {req.history.map((h,i)=>(
+              <div key={i} className="flex gap-3">
+                <div className="flex flex-col items-center">
+                  <div className="w-2.5 h-2.5 rounded-full mt-1 flex-shrink-0" style={{background:DOTS[i%DOTS.length]}}/>
+                  {i<req.history.length-1&&<div className="w-px flex-1 mt-1 mb-1" style={{background:'#F0EBE5'}}/>}
+                </div>
+                <div className="pb-4 flex-1">
+                  <p className="text-xs font-semibold leading-snug" style={{color:'#1A1A1A'}}>{h.action}</p>
+                  <p className="text-xs mt-0.5" style={{color:'#AAA'}}>{h.actor}</p>
+                  <p className="text-xs mt-0.5" style={{color:'#C9BBAA'}}>{h.date}</p>
+                  {h.comment&&<p className="text-xs mt-1.5 px-3 py-1.5 rounded-lg italic" style={{background:'#F7F3EE',color:'#666'}}>"{h.comment}"</p>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Lightbox */}
+      {lightbox&&(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overlay" style={{background:'rgba(0,0,0,.9)'}} onClick={()=>setLightbox(null)}>
+          <img src={lightbox.data} alt="" className="max-w-full max-h-full rounded-2xl"/>
+        </div>
+      )}
+
+      {/* Modals */}
+      {modal==='approve'&&(
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 overlay" style={{background:'rgba(0,0,0,.5)'}}>
+          <div className="w-full max-w-sm rounded-2xl p-5 slide-up" style={{background:'#fff'}}>
+            <p className="font-bold mb-1" style={{color:'#1A1A1A'}}>Confirmar Aprovação</p>
+            <p className="text-sm mb-3" style={{color:'#888'}}>A solicitação será enviada para o dono aprovar.</p>
+            <textarea value={comment} onChange={e=>setComment(e.target.value)} rows={2} placeholder="Comentário opcional..."
+              className="w-full px-3 py-2 rounded-xl text-sm resize-none mb-3" style={{background:'#F7F6F3',border:'1px solid #E0D9D0',color:'#1A1A1A'}}/>
+            <div className="flex gap-2">
+              <button onClick={()=>setModal(null)} className="flex-1 py-2.5 rounded-xl text-sm font-medium" style={{border:'1px solid #E0D9D0',color:'#666'}}>Cancelar</button>
+              <button onClick={approve} className="flex-1 py-2.5 rounded-xl text-sm font-semibold" style={{background:'#0A0A0A',color:'#C9BBAA'}}>Aprovar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modal==='reject'&&(
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 overlay" style={{background:'rgba(0,0,0,.5)'}}>
+          <div className="w-full max-w-sm rounded-2xl p-5 slide-up" style={{background:'#fff'}}>
+            <p className="font-bold mb-1" style={{color:'#1A1A1A'}}>Recusar Solicitação</p>
+            <p className="text-sm mb-3" style={{color:'#888'}}>Informe o motivo da recusa.</p>
+            <textarea value={comment} onChange={e=>setComment(e.target.value)} rows={3} placeholder="Motivo obrigatório..."
+              className="w-full px-3 py-2 rounded-xl text-sm resize-none mb-3" style={{background:'#F7F6F3',border:'1px solid #E0D9D0',color:'#1A1A1A'}}/>
+            {isDono&&(
+              <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl text-xs" style={{background:'#FFF7ED',border:'1px solid #FED7AA',color:'#C2410C'}}>
+                <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path strokeLinecap="round" d="M12 8v4m0 4h.01"/></svg>
+                A recusa ficará visível para a supervisora e para o solicitante.
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button onClick={()=>setModal(null)} className="flex-1 py-2.5 rounded-xl text-sm font-medium" style={{border:'1px solid #E0D9D0',color:'#666'}}>Cancelar</button>
+              <button onClick={()=>{if(comment.trim())reject();}}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition"
+                style={{background:comment.trim()?'#DC2626':'#FCA5A5',color:'#fff',cursor:comment.trim()?'pointer':'not-allowed'}}>
+                Recusar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modal==='payment'&&(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 overlay" style={{background:'rgba(0,0,0,.65)'}}>
+          <div className="w-full max-w-lg rounded-2xl slide-up flex flex-col" style={{background:'#fff',maxHeight:'92vh'}}>
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4" style={{borderBottom:'1px solid #EDE8E3'}}>
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{background:'#0A0A0A'}}>
+                  <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#C9BBAA" strokeWidth="2"><path strokeLinecap="round" d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z"/></svg>
+                </div>
+                <div>
+                  <p className="font-bold text-sm" style={{color:'#1A1A1A'}}>Confirmar Lançamento</p>
+                  <p className="text-xs" style={{color:'#AAA'}}>API TOTVS Moda · FCPFM004</p>
+                </div>
+              </div>
+              <button onClick={()=>{setModal(null);setTotvsResult(null);}} className="w-8 h-8 rounded-xl flex items-center justify-center transition hover:bg-gray-100" style={{color:'#AAA',fontSize:'18px'}}>✕</button>
+            </div>
+
+            {/* Body */}
+            <div className="overflow-y-auto flex-1 p-5 space-y-4">
+
+              {/* Resumo da solicitação */}
+              <div className="rounded-xl p-3 grid grid-cols-3 gap-3 text-xs" style={{background:'#F7F3EE',border:'1px solid #EDE8E3'}}>
+                <div><p style={{color:'#AAA'}}>Solicitante</p><p className="font-semibold mt-0.5" style={{color:'#1A1A1A'}}>{req.solicitanteName}</p></div>
+                <div><p style={{color:'#AAA'}}>Valor</p><p className="font-bold mt-0.5" style={{color:'#C9BBAA',fontSize:'15px'}}>{R(req.amount)}</p></div>
+                <div><p style={{color:'#AAA'}}>Categoria</p><p className="font-semibold mt-0.5" style={{color:'#1A1A1A'}}>{req.category}</p></div>
+              </div>
+
+              {/* Dados TOTVS — resumo */}
+              <div className="rounded-xl p-3.5 text-xs space-y-2" style={{background:'#FAFAF8',border:'1px solid #EDE8E3'}}>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                  <div><span style={{color:'#AAA'}}>Cód. Duplicata: </span><span className="font-semibold" style={{color:'#1A1A1A'}}>{t.duplicateCode||'—'}</span></div>
+                  <div><span style={{color:'#AAA'}}>Parcelas: </span><span className="font-semibold" style={{color:'#C9BBAA'}}>{t.parcelas||1}x de {R((req.amount||0)/(t.parcelas||1))}</span></div>
+                  <div><span style={{color:'#AAA'}}>1º Vencimento: </span><span className="font-semibold" style={{color:'#1A1A1A'}}>{t.dueDate||'—'}</span></div>
+                  <div><span style={{color:'#AAA'}}>Tipo Doc.: </span><span className="font-semibold" style={{color:'#1A1A1A'}}>{(DOCUMENT_TYPES.find(d=>d.v==t.document)||{}).l||t.document||'—'}</span></div>
+                  <div><span style={{color:'#AAA'}}>Despesa: </span><span className="font-semibold" style={{color:'#1A1A1A'}}>{(()=>{ const d=EXPENSE_TYPES.find(x=>x.v==t.expenseCode); return d?`${d.v} — ${d.l}`:(t.expenseCode||'—'); })()}</span></div>
+                  <div><span style={{color:'#AAA'}}>% Rateio: </span><span className="font-semibold" style={{color:'#1A1A1A'}}>{t.proratedPercentage||100}%</span></div>
+                </div>
+                {t.observation&&<div style={{borderTop:'1px solid #EDE8E3',paddingTop:'8px'}}><span style={{color:'#AAA'}}>Observação: </span><span style={{color:'#555'}}>{t.observation}</span></div>}
+              </div>
+
+
+              {/* Resultado */}
+              {totvsResult && (
+                <div className="rounded-xl p-3.5" style={{
+                  background: totvsResult.ok ? (totvsResult.warn?'#FFFBEB':'#F0FDF4') : '#FEF2F2',
+                  border: `1px solid ${totvsResult.ok ? (totvsResult.warn?'#FDE68A':'#BBF7D0') : '#FECACA'}`
+                }}>
+                  <p className="text-sm font-semibold" style={{color:totvsResult.ok?(totvsResult.warn?'#92400E':'#15803D'):'#DC2626'}}>{totvsResult.msg}</p>
+                  {totvsResult.cors && (
+                    <p className="text-xs mt-1.5" style={{color:'#DC2626',opacity:.8}}>
+                      ℹ️ Em produção, configure um proxy no Easypanel: <code>/api/totvs</code> → <code>https://www30.bhan.com.br:9443</code>
+                    </p>
+                  )}
+                  {totvsResult.detail && (
+                    <details className="mt-2">
+                      <summary className="text-xs cursor-pointer font-semibold" style={{color:'#DC2626'}}>VER DETALHE DO ERRO ▸</summary>
+                      <pre className="mt-1.5 p-2 rounded-lg text-xs overflow-x-auto whitespace-pre-wrap" style={{background:'#fff0f0',color:'#991B1B',maxHeight:'160px'}}>
+                        {totvsResult.detail}
+                      </pre>
+                    </details>
+                  )}
+                  {totvsResult.ok && (
+                    <p className="text-xs mt-1.5" style={{color:'#15803D',opacity:.8}}>Clique em "Confirmar" para atualizar o status da solicitação.</p>
+                  )}
+                </div>
+              )}
+
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-4 flex gap-2" style={{borderTop:'1px solid #EDE8E3'}}>
+              <button onClick={()=>{setModal(null);setTotvsResult(null);}} className="flex-1 py-2.5 rounded-xl text-sm font-medium transition"
+                style={{border:'1px solid #E0D9D0',color:'#666'}}>
+                Cancelar
+              </button>
+              {!totvsResult?.ok && (
+                <button onClick={callTotvs} disabled={!!totvsLoading}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-60"
+                  style={{background:'#0A0A0A',color:'#C9BBAA'}}>
+                  {totvsLoading==='auth'
+                    ? <><svg className="spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#C9BBAA" strokeWidth="3" strokeDasharray="60" strokeDashoffset="15"/></svg>Autenticando...</>
+                    : totvsLoading==='sending'
+                    ? <><svg className="spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#C9BBAA" strokeWidth="3" strokeDasharray="60" strokeDashoffset="15"/></svg>Enviando para TOTVS...</>
+                    : <><svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z"/></svg>Lançar no Sistema</>
+                  }
+                </button>
+              )}
+              {totvsResult?.ok && (
+                <button onClick={finalizePay}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-95"
+                  style={{background:'#15803D',color:'#fff'}}>
+                  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" d="M5 13l4 4L19 7"/></svg>
+                  Confirmar e Fechar
+                </button>
+              )}
+            </div>
+
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════ SOLICITAÇÕES LIST ═══════════════════════ */
+function SolicitacoesView({ user, requests, onSelect, onNew, dispatch, showToast }) {
+  const [filter,setFilter]=useState('all');
+  const [search,setSearch]=useState('');
+  const [selected,setSelected]=useState(new Set());
+  const [bulkLoading,setBulkLoading]=useState(false);
+  const [bulkProgress,setBulkProgress]=useState(null);
+
+  const isSup  = user.role==='supervisora';
+  const isDono = user.role==='dono';
+
+  let base = requests;
+  if(user.role==='solicitante') base=requests.filter(r=>r.solicitanteId===user.id);
+  if(user.role==='dono')        base=requests.filter(r=>r.status!=='pending_supervisor'||r.solicitanteId===user.id);
+
+  const filtered = base
+    .filter(r=>filter==='all'||r.status===filter)
+    .filter(r=>!search||r.title.toLowerCase().includes(search.toLowerCase())||(r.solicitanteName||'').toLowerCase().includes(search.toLowerCase()));
+
+  // Quais linhas podem ser selecionadas
+  const canSelect = r => (isSup&&r.status==='pending_supervisor')||(isDono&&r.status==='pending_owner');
+  const eligible  = filtered.filter(canSelect);
+  const allSelected = eligible.length>0 && eligible.every(r=>selected.has(r.id));
+
+  const toggleRow = id => setSelected(p=>{ const s=new Set(p); s.has(id)?s.delete(id):s.add(id); return s; });
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(eligible.map(r=>r.id)));
+
+  /* ── Aprovação em lote: supervisora ── */
+  const bulkApproveSup = () => {
+    if(!window.confirm(`Aprovar ${selected.size} solicitação${selected.size!==1?'ões':''} e enviar ao dono?`)) return;
+    for(const id of [...selected]){
+      dispatch({type:'UPDATE',id,status:'pending_owner',actor:user.name,label:'Aprovado em lote pela supervisora',comment:''});
+    }
+    showToast(`${selected.size} solicitação${selected.size!==1?'ões':''} aprovada${selected.size!==1?'s':''}!`);
+    setSelected(new Set());
+  };
+
+  /* ── Aprovação em lote: dono → TOTVS ── */
+  const bulkApproveDono = async () => {
+    if(!window.confirm(`Aprovar ${selected.size} solicitação${selected.size!==1?'ões':''} e lançar no TOTVS?`)) return;
+    setBulkLoading(true);
+    const ids=[...selected];
+
+    // Autentica uma vez
+    let token;
+    try {
+      const authBody=new URLSearchParams({Grant_type:'password',Client_id:'deepapiv2',Client_secret:'4270929817',Username:'ECOMM',Password:'1995'});
+      const ar=await fetch('https://www30.bhan.com.br:9443/api/totvsmoda/authorization/v2/token',
+        {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'},body:authBody});
+      if(!ar.ok) throw new Error(`Auth ${ar.status}`);
+      const ad=await ar.json();
+      token=ad.access_token||ad.token||ad.accessToken;
+      if(!token) throw new Error('Token vazio');
+    } catch(e){
+      showToast('Falha na autenticação TOTVS','err');
+      setBulkLoading(false); return;
+    }
+
+    let ok=0,fail=0;
+    for(let i=0;i<ids.length;i++){
+      setBulkProgress({current:i+1,total:ids.length});
+      const req=requests.find(r=>r.id===ids[i]);
+      if(!req){fail++;continue;}
+      try{
+        const res=await fetch(TOTVS_API,{
+          method:'POST',
+          headers:{'Content-Type':'application/json','Accept':'application/json','Authorization':`Bearer ${token}`},
+          body:JSON.stringify(buildTotvsPayload(req)),
+        });
+        if(res.ok){
+          dispatch({type:'MARK_SENT',id:req.id});
+          dispatch({type:'UPDATE',id:req.id,status:'pending_payment',actor:user.name,label:'Aprovado em lote pelo dono — lançado no TOTVS',comment:''});
+          sbUpdate('requests',{sent_to_totvs:true},`?id=eq.${req.id}`).catch(()=>{});
+          ok++;
+        } else { fail++; }
+      } catch{ fail++; }
+    }
+
+    setBulkLoading(false); setBulkProgress(null); setSelected(new Set());
+    if(fail===0) showToast(`${ok} lançada${ok!==1?'s':''} no TOTVS com sucesso!`);
+    else showToast(`${ok} ok, ${fail} com erro — verifique individualmente`,'err');
+  };
+
+  const FILTERS = [
+    {v:'all',l:'Todas'},
+    ...(isSup?[{v:'pending_supervisor',l:'Para Revisar'}]:[]),
+    ...(isDono?[{v:'pending_owner',l:'Para Aprovar'}]:[]),
+    {v:'pending_payment',l:'Em Pagamento'},
+    {v:'rejected',l:'Recusadas'},
+    {v:'returned_supervisor',l:'Devolvidas'},
+  ];
+
+  return (
+    <div className="fade">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-xl font-bold" style={{color:'#1A1A1A'}}>Solicitações</h1>
+          <p className="text-sm mt-0.5" style={{color:'#888'}}>{filtered.length} registro{filtered.length!==1?'s':''} encontrado{filtered.length!==1?'s':''}</p>
+        </div>
+        <button onClick={onNew} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95" style={{background:'#0A0A0A',color:'#C9BBAA'}}>
+          <I.plus/> Nova
+        </button>
+      </div>
+
+      {/* Search + Filters */}
+      <div className="flex flex-col sm:flex-row gap-3 mb-4">
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar por título ou solicitante..."
+          className="flex-1 px-4 py-2.5 rounded-xl text-sm" style={{background:'#fff',border:'1px solid #E0D9D0',color:'#1A1A1A'}}
+          onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor='#E0D9D0'}/>
+        <div className="flex gap-1.5 flex-wrap">
+          {FILTERS.map(f=>(
+            <button key={f.v} onClick={()=>setFilter(f.v)}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold transition whitespace-nowrap"
+              style={{background:filter===f.v?'#0A0A0A':'#fff',color:filter===f.v?'#C9BBAA':'#888',border:`1px solid ${filter===f.v?'#0A0A0A':'#E0D9D0'}`}}>
+              {f.l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Table header (desktop) */}
+      <div className="hidden md:grid gap-3 px-4 py-2 mb-1 text-xs font-bold" style={{color:'#AAA',letterSpacing:'0.07em',gridTemplateColumns:(isSup||isDono)?'24px 1fr 1fr 1fr auto auto 24px':'1fr 1fr 1fr auto auto 24px'}}>
+        {(isSup||isDono)&&(
+          <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{accentColor:'#0A0A0A',cursor:'pointer'}} title="Selecionar todas elegíveis"/>
+        )}
+        <div>TÍTULO</div>
+        <div>SOLICITANTE</div>
+        <div>CATEGORIA</div>
+        <div className="text-right">VALOR</div>
+        <div className="text-center">STATUS</div>
+        <div/>
+      </div>
+
+      {/* Rows */}
+      {filtered.length===0?(
+        <div className="rounded-2xl p-12 text-center" style={{background:'#fff',border:'1px solid #EDE8E3'}}>
+          <svg width="36" height="36" className="mx-auto mb-3" fill="none" viewBox="0 0 24 24" style={{color:'#E0D9D0'}}>
+            <path d="M9 12h6m-6 4h6M9 8h3M5 3h11l3 3v15a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+          <p className="text-sm font-medium" style={{color:'#AAA'}}>Nenhuma solicitação encontrada</p>
+        </div>
+      ):(
+        <div className="space-y-1.5">
+          {filtered.map(r=>(
+            <div key={r.id}
+              className="rounded-xl transition-all"
+              style={{background: selected.has(r.id)?'#FAFAF7':'#fff', border:`1px solid ${selected.has(r.id)?'#C9BBAA':'#EDE8E3'}`}}
+              onMouseEnter={e=>{if(!selected.has(r.id)){e.currentTarget.style.borderColor='#C9BBAA';e.currentTarget.style.boxShadow='0 2px 12px rgba(0,0,0,.06)'}}}
+              onMouseLeave={e=>{if(!selected.has(r.id)){e.currentTarget.style.borderColor='#EDE8E3';e.currentTarget.style.boxShadow='none'}}}>
+              {/* Desktop row */}
+              <div className="hidden md:grid gap-3 px-4 py-3.5 items-center"
+                style={{gridTemplateColumns:(isSup||isDono)?'24px 1fr 1fr 1fr auto auto 24px':'1fr 1fr 1fr auto auto 24px'}}>
+                {(isSup||isDono)&&(
+                  <input type="checkbox"
+                    checked={selected.has(r.id)}
+                    disabled={!canSelect(r)}
+                    onChange={e=>{e.stopPropagation();toggleRow(r.id);}}
+                    onClick={e=>e.stopPropagation()}
+                    style={{accentColor:'#0A0A0A',cursor:canSelect(r)?'pointer':'default',opacity:canSelect(r)?1:0.25}}/>
+                )}
+                <div className="cursor-pointer" onClick={()=>onSelect(r.id)}>
+                  <p className="text-sm font-semibold truncate" style={{color:'#1A1A1A'}}>{r.title}</p>
+                  <p className="text-xs" style={{color:'#AAA'}}>{r.created_at}</p>
+                </div>
+                <div className="text-sm truncate cursor-pointer" style={{color:'#666'}} onClick={()=>onSelect(r.id)}>{r.solicitanteName}</div>
+                <div className="text-sm truncate cursor-pointer" style={{color:'#666'}} onClick={()=>onSelect(r.id)}>{r.category}</div>
+                <div className="text-right text-sm font-bold cursor-pointer" style={{color:'#C9BBAA'}} onClick={()=>onSelect(r.id)}>{R(r.amount)}</div>
+                <div className="flex justify-center cursor-pointer" onClick={()=>onSelect(r.id)}><Badge status={r.status}/></div>
+                <div className="flex justify-end cursor-pointer" style={{color:'#CCC'}} onClick={()=>onSelect(r.id)}><I.chevron/></div>
+              </div>
+              {/* Mobile card */}
+              <div className="md:hidden p-4 flex gap-3 items-start" onClick={()=>onSelect(r.id)}>
+                {(isSup||isDono)&&canSelect(r)&&(
+                  <input type="checkbox" checked={selected.has(r.id)}
+                    onChange={e=>{e.stopPropagation();toggleRow(r.id);}}
+                    onClick={e=>e.stopPropagation()}
+                    style={{accentColor:'#0A0A0A',marginTop:'3px',flexShrink:0}}/>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <p className="text-sm font-semibold" style={{color:'#1A1A1A'}}>{r.title}</p>
+                    <span className="text-sm font-bold flex-shrink-0" style={{color:'#C9BBAA'}}>{R(r.amount)}</span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge status={r.status}/>
+                    <span className="text-xs" style={{color:'#AAA'}}>{r.category} · {r.solicitanteName}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Barra flutuante de aprovação em lote */}
+      {selected.size>0&&(
+        <div className="fixed bottom-6 left-1/2 z-50 fade flex items-center gap-3 px-5 py-3 rounded-2xl shadow-2xl"
+          style={{transform:'translateX(-50%)',background:'#0A0A0A',border:'1px solid #2A2A2A'}}>
+          <span className="text-sm font-semibold" style={{color:'#C9BBAA'}}>
+            {selected.size} selecionada{selected.size!==1?'s':''}
+          </span>
+          <div className="w-px h-4 flex-shrink-0" style={{background:'#333'}}/>
+          <button
+            onClick={isSup?bulkApproveSup:bulkApproveDono}
+            disabled={bulkLoading}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 disabled:opacity-60"
+            style={{background:'#C9BBAA',color:'#0A0A0A'}}>
+            {bulkLoading
+              ? <><svg className="spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#0A0A0A" strokeWidth="3" strokeDasharray="60" strokeDashoffset="15"/></svg>
+                  {bulkProgress?`Enviando ${bulkProgress.current}/${bulkProgress.total}...`:'Processando...'}</>
+              : <><I.check/> Aprovar {selected.size}</>
+            }
+          </button>
+          <button onClick={()=>setSelected(new Set())} disabled={bulkLoading}
+            className="text-xs px-3 py-2 rounded-xl transition disabled:opacity-40"
+            style={{color:'#666'}}>
+            Cancelar
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════ ADMIN VIEW ═══════════════════════ */
+function AdminView({ showToast }) {
+  const [users,setUsers]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [modal,setModal]=useState(null); // null | 'new' | user_object
+  const [saving,setSaving]=useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try { setUsers(await sbSelect('profiles','?order=created_at.asc')||[]); }
+    catch(e){ showToast('Erro ao carregar usuários','err'); }
+    setLoading(false);
+  };
+  useEffect(()=>{load();},[]);
+
+  const toggleActive = async (u) => {
+    try {
+      await sbUpdate('profiles',{is_active:!u.is_active},`?id=eq.${u.id}`);
+      setUsers(p=>p.map(x=>x.id===u.id?{...x,is_active:!x.is_active}:x));
+      showToast(u.is_active?'Usuário desativado':'Usuário reativado');
+    } catch{ showToast('Erro ao atualizar','err'); }
+  };
+
+  const deleteUser = async (u) => {
+    if(!confirm(`Excluir ${u.name}?`)) return;
+    try {
+      await sbDelete('profiles',`?id=eq.${u.id}`);
+      setUsers(p=>p.filter(x=>x.id!==u.id));
+      showToast('Usuário removido');
+    } catch{ showToast('Erro ao remover','err'); }
+  };
+
+  const ROLE_COLOR = {admin:'#8B5CF6',supervisora:'#3B82F6',dono:'#F59E0B',financeiro:'#22C55E',solicitante:'#888'};
+
+  return (
+    <div className="fade">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-xl font-bold" style={{color:'#1A1A1A'}}>Usuários</h1>
+          <p className="text-sm mt-0.5" style={{color:'#888'}}>{users.length} usuário{users.length!==1?'s':''} cadastrado{users.length!==1?'s':''}</p>
+        </div>
+        <button onClick={()=>setModal('new')}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+          style={{background:'#0A0A0A',color:'#C9BBAA'}}>
+          <I.plus/> Novo Usuário
+        </button>
+      </div>
+
+      {loading?(
+        <div className="flex items-center justify-center py-16"><Spinner/></div>
+      ):(
+        <div className="space-y-2">
+          {users.map(u=>(
+            <div key={u.id} className="rounded-xl px-5 py-4 flex items-center gap-4"
+              style={{background:'#fff',border:'1px solid #EDE8E3',opacity:u.is_active?1:0.55}}>
+              <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                style={{background:'rgba(201,187,170,.15)',color:'#C9BBAA'}}>
+                {u.name.split(' ').map(w=>w[0]).slice(0,2).join('')}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-sm" style={{color:'#1A1A1A'}}>{u.name}</p>
+                <p className="text-xs" style={{color:'#AAA'}}>{u.email}</p>
+              </div>
+              <div className="flex items-center gap-3 flex-shrink-0">
+                <span className="text-xs font-bold px-2.5 py-1 rounded-full"
+                  style={{background:`${ROLE_COLOR[u.role]}18`,color:ROLE_COLOR[u.role]}}>
+                  {ROLE_LABELS[u.role]}
+                </span>
+                {(u.allowed_expense_codes?.length>0||u.allowed_document_types?.length>0)&&(
+                  <span className="text-xs px-2 py-0.5 rounded-full" style={{background:'#FEF3E2',color:'#B45309'}}>Restrito</span>
+                )}
+                <button onClick={()=>setModal(u)} className="text-xs px-3 py-1.5 rounded-lg transition"
+                  style={{background:'#F5F0EB',color:'#888'}}
+                  onMouseEnter={e=>e.currentTarget.style.background='#EDE8E3'} onMouseLeave={e=>e.currentTarget.style.background='#F5F0EB'}>
+                  Editar
+                </button>
+                <button onClick={()=>toggleActive(u)} className="text-xs px-3 py-1.5 rounded-lg transition"
+                  style={{background:u.is_active?'#FEF2F2':'#F0FDF4',color:u.is_active?'#DC2626':'#15803D'}}>
+                  {u.is_active?'Desativar':'Ativar'}
+                </button>
+              </div>
+            </div>
+          ))}
+          {!users.length&&<div className="rounded-xl p-12 text-center" style={{background:'#fff',border:'1px solid #EDE8E3'}}><p className="text-sm" style={{color:'#AAA'}}>Nenhum usuário cadastrado</p></div>}
+        </div>
+      )}
+
+      {/* Modal criar/editar */}
+      {modal&&<UserModal
+        user={modal==='new'?null:modal}
+        onClose={()=>setModal(null)}
+        onSave={async (data)=>{
+          setSaving(true);
+          try {
+            if(modal==='new'){
+              const [row]=await sbInsert('profiles',{
+                name:data.name,email:data.email,password:data.password,
+                role:data.role,
+                allowed_expense_codes:data.allowed_expense_codes,
+                allowed_document_types:data.allowed_document_types,
+              });
+              setUsers(p=>[...p,row]);
+              showToast('Usuário criado com sucesso!');
+            } else {
+              const payload={name:data.name,email:data.email,role:data.role,
+                allowed_expense_codes:data.allowed_expense_codes,
+                allowed_document_types:data.allowed_document_types};
+              if(data.password) payload.password=data.password;
+              await sbUpdate('profiles',payload,`?id=eq.${modal.id}`);
+              setUsers(p=>p.map(x=>x.id===modal.id?{...x,...payload}:x));
+              showToast('Usuário atualizado!');
+            }
+            setModal(null);
+          } catch(e){ showToast(e.message||'Erro ao salvar','err'); }
+          setSaving(false);
+        }}
+        saving={saving}
+      />}
+    </div>
+  );
+}
+
+/* ═══════════════════════ USER MODAL ═══════════════════════ */
+function UserModal({ user, onClose, onSave, saving }) {
+  const [name,setName]   = useState(user?.name||'');
+  const [email,setEmail] = useState(user?.email||'');
+  const [pw,setPw]       = useState('');
+  const [role,setRole]   = useState(user?.role||'solicitante');
+  const [restrictExp,setRestrictExp] = useState((user?.allowed_expense_codes?.length||0)>0);
+  const [selExp,setSelExp] = useState(new Set(user?.allowed_expense_codes||[]));
+  const [restrictDoc,setRestrictDoc] = useState((user?.allowed_document_types?.length||0)>0);
+  const [selDoc,setSelDoc] = useState(new Set(user?.allowed_document_types||[]));
+  const [expSearch,setExpSearch] = useState('');
+  const [tab,setTab] = useState('info'); // 'info' | 'exp' | 'doc'
+
+  const toggleExp = v => setSelExp(p=>{ const s=new Set(p); s.has(v)?s.delete(v):s.add(v); return s; });
+  const toggleDoc = v => setSelDoc(p=>{ const s=new Set(p); s.has(v)?s.delete(v):s.add(v); return s; });
+
+  const submit = () => {
+    if(!name.trim()||!email.trim()){alert('Nome e email obrigatórios');return;}
+    if(!user&&!pw.trim()){alert('Senha obrigatória para novo usuário');return;}
+    onSave({
+      name:name.trim(), email:email.trim().toLowerCase(), password:pw,
+      role,
+      allowed_expense_codes: restrictExp?[...selExp]:[],
+      allowed_document_types: restrictDoc?[...selDoc]:[],
+    });
+  };
+
+  const filteredExp = EXPENSE_TYPES.filter(e=>
+    !expSearch || e.l.toLowerCase().includes(expSearch.toLowerCase()) || String(e.v).includes(expSearch));
+
+  const inp = 'w-full px-3 py-2.5 rounded-xl text-sm';
+  const is  = {background:'#FAFAF8',border:'1px solid #E0D9D0',color:'#1A1A1A'};
+  const Lbl = ({c})=><label className="block text-xs font-semibold mb-1.5" style={{color:'#888',letterSpacing:'0.06em'}}>{c}</label>;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overlay" style={{background:'rgba(0,0,0,.5)'}}>
+      <div className="w-full max-w-lg rounded-2xl slide-up flex flex-col" style={{background:'#fff',maxHeight:'90vh'}}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4" style={{borderBottom:'1px solid #EDE8E3'}}>
+          <p className="font-bold" style={{color:'#1A1A1A'}}>{user?'Editar Usuário':'Novo Usuário'}</p>
+          <button onClick={onClose} className="w-8 h-8 rounded-xl flex items-center justify-center text-lg hover:bg-gray-100" style={{color:'#AAA'}}>✕</button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex px-5 pt-4 gap-1">
+          {[['info','Dados'],['exp','Despesas'],['doc','Documentos']].map(([id,l])=>(
+            <button key={id} onClick={()=>setTab(id)}
+              className="px-4 py-1.5 rounded-lg text-xs font-semibold transition"
+              style={{background:tab===id?'#0A0A0A':'#F5F0EB',color:tab===id?'#C9BBAA':'#888'}}>
+              {l}{id==='exp'&&restrictExp&&selExp.size>0&&<span className="ml-1 text-xs opacity-70">({selExp.size})</span>}
+              {id==='doc'&&restrictDoc&&selDoc.size>0&&<span className="ml-1 text-xs opacity-70">({selDoc.size})</span>}
+            </button>
+          ))}
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto flex-1 px-5 pb-4 pt-4 space-y-3">
+          {tab==='info'&&(<>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Lbl c="NOME"/><input value={name} onChange={e=>setName(e.target.value)} className={inp} style={is} onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor='#E0D9D0'}/></div>
+              <div><Lbl c="FUNÇÃO"/>
+                <select value={role} onChange={e=>setRole(e.target.value)} className={inp} style={{...is,appearance:'none'}} onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor='#E0D9D0'}>
+                  {Object.entries(ROLE_LABELS).map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                </select>
+              </div>
+            </div>
+            <div><Lbl c="EMAIL"/><input type="email" value={email} onChange={e=>setEmail(e.target.value)} className={inp} style={is} onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor='#E0D9D0'}/></div>
+            <div><Lbl c={user?'NOVA SENHA (deixe em branco para não alterar)':'SENHA'}/>
+              <input type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder={user?'••••••':''} className={inp} style={is} onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor='#E0D9D0'}/></div>
+          </>)}
+
+          {tab==='exp'&&(<>
+            <div className="flex items-center justify-between p-3 rounded-xl" style={{background:'#F7F3EE',border:'1px solid #EDE8E3'}}>
+              <div>
+                <p className="text-sm font-semibold" style={{color:'#1A1A1A'}}>Restringir códigos de despesa</p>
+                <p className="text-xs mt-0.5" style={{color:'#AAA'}}>Desativado = todas liberadas</p>
+              </div>
+              <button onClick={()=>setRestrictExp(p=>!p)}
+                className="w-11 h-6 rounded-full transition-all relative"
+                style={{background:restrictExp?'#0A0A0A':'#E0D9D0'}}>
+                <span className="absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-sm"
+                  style={{left:restrictExp?'calc(100% - 20px)':'4px'}}/>
+              </button>
+            </div>
+            {restrictExp&&(<>
+              <input value={expSearch} onChange={e=>setExpSearch(e.target.value)} placeholder="Buscar despesa..."
+                className={inp} style={{...is,marginBottom:'4px'}} onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor='#E0D9D0'}/>
+              <div className="rounded-xl overflow-y-auto space-y-0.5" style={{maxHeight:'220px',border:'1px solid #EDE8E3'}}>
+                {filteredExp.map(e=>(
+                  <label key={e.v} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50 transition">
+                    <input type="checkbox" checked={selExp.has(e.v)} onChange={()=>toggleExp(e.v)}
+                      className="rounded" style={{accentColor:'#0A0A0A'}}/>
+                    <span className="text-xs" style={{color:'#1A1A1A'}}><span style={{color:'#AAA',marginRight:'4px'}}>{e.v}</span>{e.l}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-right" style={{color:'#AAA'}}>{selExp.size} selecionado{selExp.size!==1?'s':''}</p>
+            </>)}
+          </>)}
+
+          {tab==='doc'&&(<>
+            <div className="flex items-center justify-between p-3 rounded-xl" style={{background:'#F7F3EE',border:'1px solid #EDE8E3'}}>
+              <div>
+                <p className="text-sm font-semibold" style={{color:'#1A1A1A'}}>Restringir tipos de documento</p>
+                <p className="text-xs mt-0.5" style={{color:'#AAA'}}>Desativado = todos liberados</p>
+              </div>
+              <button onClick={()=>setRestrictDoc(p=>!p)}
+                className="w-11 h-6 rounded-full transition-all relative"
+                style={{background:restrictDoc?'#0A0A0A':'#E0D9D0'}}>
+                <span className="absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-sm"
+                  style={{left:restrictDoc?'calc(100% - 20px)':'4px'}}/>
+              </button>
+            </div>
+            {restrictDoc&&(
+              <div className="rounded-xl overflow-y-auto space-y-0.5" style={{maxHeight:'260px',border:'1px solid #EDE8E3'}}>
+                {DOCUMENT_TYPES.map(d=>(
+                  <label key={d.v} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-gray-50 transition">
+                    <input type="checkbox" checked={selDoc.has(d.v)} onChange={()=>toggleDoc(d.v)}
+                      style={{accentColor:'#0A0A0A'}}/>
+                    <span className="text-xs" style={{color:'#1A1A1A'}}><span style={{color:'#AAA',marginRight:'4px'}}>{d.v}</span>{d.l}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </>)}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-4 flex gap-2" style={{borderTop:'1px solid #EDE8E3'}}>
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-xl text-sm font-medium"
+            style={{border:'1px solid #E0D9D0',color:'#666'}}>Cancelar</button>
+          <button onClick={submit} disabled={saving}
+            className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-60"
+            style={{background:'#0A0A0A',color:'#C9BBAA'}}>
+            {saving?<><Spinner/>Salvando...</>:'Salvar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════ APP ═══════════════════════ */
+function App() {
+  const [user,setUser]=useState(null);
+  const [view,setView]=useState('dashboard');
+  const [selected,setSelected]=useState(null);
+  const [toast,setToast]=useState(null);
+  const [menuOpen,setMenuOpen]=useState(false);
+  const [appLoading,setAppLoading]=useState(false);
+  const [requests,dispatch]=useReducer(reducer,[]);
+
+  const showToast=(msg,type='ok')=>{setToast({msg,type});setTimeout(()=>setToast(null),3500);};
+
+  const loadRequests = async () => {
+    setAppLoading(true);
+    try {
+      const rows = await sbSelect('requests','?order=created_at.desc')||[];
+      const normalized = rows.map(r=>({
+        ...r,
+        solicitanteId:   r.solicitante_id||'',
+        solicitanteName: r.solicitante_name||r.created_by||'',
+        created_at: r.created_at
+          ? new Date(r.created_at).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})
+          : '',
+        receipts: r.receipts||[],
+        history:  r.history||[],
+        totvs:    r.totvs||{},
+      }));
+      dispatch({type:'SET', reqs: normalized});
+    } catch(e){ showToast('Aviso: nao foi possivel carregar do banco','err'); }
+    setAppLoading(false);
+  };
+
+  const handleLogin = async (u) => {
+    setUser(u);
+    setView(u.role==='solicitante'?'requests':'dashboard');
+    await loadRequests();
+  };
+
+  const handleSubmit = async (req) => {
+    dispatch({type:'ADD',req});
+    setView('requests');
+    showToast('Solicitacao enviada para a supervisora!');
+    try {
+      await sbInsert('requests',{
+        id:req.id, title:req.title,
+        description:req.description||'', amount:req.amount,
+        category:req.category||'', status:req.status,
+        created_by:req.solicitanteName,
+        solicitante_id:req.solicitanteId,
+        solicitante_name:req.solicitanteName,
+        history:req.history, totvs:req.totvs,
+        receipts:(req.receipts||[]).map(r=>({name:r.name,type:r.type,data:r.data})),
+        sent_to_totvs:false,
+      });
+    } catch(e){ showToast('Aviso: erro ao salvar no banco','err'); }
+  };
+
+  const syncDispatch = async (action) => {
+    dispatch(action);
+    if(action.type==='UPDATE'){
+      try {
+        const cur = requests.find(r=>r.id===action.id);
+        const newHist = [...(cur?.history||[]),{
+          date:fmtDate(), actor:action.actor, action:action.label, comment:action.comment||''
+        }];
+        await sbUpdate('requests',{
+          status:action.status, history:newHist,
+          updated_at:new Date().toISOString(),
+        },`?id=eq.${action.id}`);
+      } catch(e){ console.warn('Supabase sync:',e); }
+    }
+  };
+
+  if(!user) return <LoginPage onLogin={handleLogin}/>;
+
+  const selectedReq = requests.find(r=>r.id===selected);
+  const toastStyle  = toast?.type==='ok' ? {background:'#0A0A0A',color:'#C9BBAA'} : {background:'#DC2626',color:'#fff'};
+
+  return (
+    <div className="min-h-screen" style={{background:'#F2F0EB'}}>
+      <Sidebar user={user} view={view} setView={setView}
+        onLogout={()=>{setUser(null);dispatch({type:'SET',reqs:[]});}}
+        onNewRequest={()=>setView('new')} mobileOpen={menuOpen} onClose={()=>setMenuOpen(false)}/>
+
+      <div className="md:hidden fixed top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-3"
+        style={{background:'#0A0A0A',borderBottom:'1px solid #1A1A1A'}}>
+        <button onClick={()=>setMenuOpen(true)} style={{color:'#C9BBAA'}}><I.menu/></button>
+        <span style={{fontFamily:'Raleway,sans-serif',fontWeight:200,letterSpacing:'0.4em',color:'#C9BBAA',fontSize:'16px'}}>DEEP</span>
+        <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
+          style={{background:'rgba(201,187,170,.2)',color:'#C9BBAA'}}>
+          {user.name.split(' ').map(w=>w[0]).slice(0,2).join('')}
+        </div>
+      </div>
+
+      <main className="md:ml-56 pt-14 md:pt-0">
+        <div className="max-w-5xl mx-auto px-4 md:px-8 py-6 md:py-8">
+
+          {toast&&(
+            <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-full text-sm font-semibold shadow-xl fade flex items-center gap-2" style={toastStyle}>
+              {toast.type==='ok'?<I.check/>:<I.alert/>} {toast.msg}
+            </div>
+          )}
+
+          {appLoading?(
+            <div className="flex items-center justify-center py-24 gap-3">
+              <Spinner/><span style={{color:'#888',fontSize:'14px'}}>Carregando...</span>
+            </div>
+          ):(
+            <>
+              {view==='dashboard' && <DashboardView user={user} requests={requests}/>}
+              {view==='requests'  && <SolicitacoesView user={user} requests={requests} onSelect={id=>{setSelected(id);setView('detail');}} onNew={()=>setView('new')} dispatch={syncDispatch} showToast={showToast}/>}
+              {view==='new'       && <NewRequestForm user={user} requests={requests} onSubmit={handleSubmit} onBack={()=>setView('requests')}/>}
+              {view==='detail'&&selectedReq && <RequestDetail req={selectedReq} user={user} onBack={()=>setView('requests')} dispatch={syncDispatch} showToast={showToast}/>}
+              {view==='admin'     && <AdminView showToast={showToast}/>}
+            </>
+          )}
+
+        </div>
+      </main>
+
+      <div className="hidden md:block fixed bottom-3 right-4 text-xs font-mono" style={{color:'#333'}}>Deep Pagamentos · Supabase</div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
