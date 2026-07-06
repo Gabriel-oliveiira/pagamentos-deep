@@ -42,6 +42,37 @@ const { useState, useReducer, useRef, useEffect, useCallback } = React;
 /* ═══════════════════════ CONSTANTS ═══════════════════════ */
 const BRAND = { black:'#0A0A0A', beige:'#C9BBAA', beigeLight:'#E8DDD0', pageBg:'#F2F0EB', card:'#FFFFFF' };
 
+/* ══════════════════ DEEP LOGO ══════════════════ */
+function DeepLogo({ variant='sidebar' }) {
+  // Usa Raleway já carregado pela página — resultado idêntico à logo original
+  if (variant === 'login') return (
+    <svg viewBox="0 0 320 64" style={{display:'block',margin:'0 auto',overflow:'visible'}} aria-label="Deep">
+      <text x="160" y="50" textAnchor="middle"
+        style={{fontFamily:'Raleway, sans-serif',fontWeight:200,fontSize:'46px',letterSpacing:'0.52em',fill:'#C9BBAA'}}>
+        DEEP
+      </text>
+    </svg>
+  );
+  if (variant === 'mobile') return (
+    <svg viewBox="0 0 200 30" style={{display:'block',overflow:'visible'}} aria-label="Deep">
+      <text x="100" y="24" textAnchor="middle"
+        style={{fontFamily:'Raleway, sans-serif',fontWeight:200,fontSize:'22px',letterSpacing:'0.4em',fill:'#C9BBAA'}}>
+        DEEP
+      </text>
+    </svg>
+  );
+  // sidebar (default)
+  return (
+    <svg viewBox="0 0 160 30" style={{display:'block',overflow:'visible'}} aria-label="Deep">
+      <text x="80" y="24" textAnchor="middle"
+        style={{fontFamily:'Raleway, sans-serif',fontWeight:200,fontSize:'22px',letterSpacing:'0.45em',fill:'#C9BBAA'}}>
+        DEEP
+      </text>
+    </svg>
+  );
+}
+
+
 /* ═══════════════════════ SUPABASE ═══════════════════════ */
 const SUPABASE_URL = 'https://ffbkmmfpeeltffmdhoei.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZmYmttbWZwZWVsdGZmbWRob2VpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NDI1MDksImV4cCI6MjA5NTExODUwOX0.rwEEry1TpI8Od_hLwrAzbOhWzoNzvP9Qwwljkts4Fbo';
@@ -410,7 +441,7 @@ function Sidebar({ user, view, setView, onLogout, onNewRequest, mobileOpen, onCl
     <div className="flex flex-col h-full">
       {/* Logo */}
       <div className="px-6 pt-8 pb-6 border-b border-white/5">
-        <div style={{fontFamily:'Raleway,sans-serif',fontWeight:200,letterSpacing:'0.45em',fontSize:'20px',color:'#C9BBAA'}}>DEEP</div>
+        <DeepLogo variant="sidebar"/>
         <div style={{color:'#4A4A4A',fontSize:'10px',letterSpacing:'0.18em',marginTop:'3px',fontWeight:500}}>GRUPO DEEP</div>
       </div>
 
@@ -508,7 +539,7 @@ function LoginPage({ onLogin }) {
     <div className="min-h-screen flex items-center justify-center p-6" style={{background:'#0A0A0A'}}>
       <div className="w-full max-w-sm fade">
         <div className="text-center mb-10">
-          <div style={{fontFamily:'Raleway,sans-serif',fontWeight:200,letterSpacing:'0.55em',fontSize:'32px',color:'#C9BBAA'}}>DEEP</div>
+          <DeepLogo variant="login"/>
           <div style={{color:'#444',fontSize:'11px',letterSpacing:'0.2em',marginTop:'4px',fontWeight:500}}>GRUPO DEEP</div>
           <div style={{color:'#555',fontSize:'12px',marginTop:'16px'}}>Sistema de Pagamentos</div>
         </div>
@@ -1940,7 +1971,7 @@ function App() {
       <div className="md:hidden fixed top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-3"
         style={{background:'#0A0A0A',borderBottom:'1px solid #1A1A1A'}}>
         <button onClick={()=>setMenuOpen(true)} style={{color:'#C9BBAA'}}><I.menu/></button>
-        <span style={{fontFamily:'Raleway,sans-serif',fontWeight:200,letterSpacing:'0.4em',color:'#C9BBAA',fontSize:'16px'}}>DEEP</span>
+        <DeepLogo variant="mobile"/>
         <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
           style={{background:'rgba(201,187,170,.2)',color:'#C9BBAA'}}>
           {user.name.split(' ').map(w=>w[0]).slice(0,2).join('')}
