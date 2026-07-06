@@ -66,20 +66,20 @@ const sbDelete = (t,q)         => sbFetch(t,q,{method:'DELETE'});
 const CATEGORIES = ['Alimentação','Transporte','Material','Publicidade','Eventos','Software','Outros'];
 
 const STATUS = {
-  pending_supervisor:  { label:'Aguard. Supervisora', bg:'#FEF3E2', text:'#B45309', dot:'#F59E0B'  },
-  pending_owner:       { label:'Aguard. Aprovação',   bg:'#EFF6FF', text:'#1D4ED8', dot:'#3B82F6'  },
-  returned_supervisor: { label:'Recusado pelo Dono',  bg:'#FFF7ED', text:'#C2410C', dot:'#F97316'  },
-  pending_payment:     { label:'Env. p/ Pagamento',   bg:'#F5F3FF', text:'#6D28D9', dot:'#8B5CF6'  },
-  completed:           { label:'Pago',                bg:'#F0FDF4', text:'#15803D', dot:'#22C55E'  },
-  rejected:            { label:'Recusado',             bg:'#FEF2F2', text:'#B91C1C', dot:'#EF4444'  },
+  open:               { label:'Devolvido',            bg:'#FFF7ED', text:'#C2410C', dot:'#F97316'  },
+  pending_gestor:     { label:'Aguard. Gestor',       bg:'#FEF3E2', text:'#B45309', dot:'#F59E0B'  },
+  pending_diretor:    { label:'Aguard. Diretor',      bg:'#EFF6FF', text:'#1D4ED8', dot:'#3B82F6'  },
+  pending_financeiro: { label:'Aguard. Financeiro',   bg:'#F5F3FF', text:'#6D28D9', dot:'#8B5CF6'  },
+  completed:          { label:'Concluído',            bg:'#F0FDF4', text:'#15803D', dot:'#22C55E'  },
+  cancelled:          { label:'Cancelado',            bg:'#FEF2F2', text:'#B91C1C', dot:'#EF4444'  },
 };
 
-const ROLE_LABELS = { solicitante:'Solicitante', supervisora:'Supervisora', dono:'Dono', financeiro:'Financeiro', admin:'Admin' };
+const ROLE_LABELS = { solicitante:'Solicitante', gestor:'Gestor', diretor:'Diretor', financeiro:'Financeiro', admin:'Admin' };
 
 const CHART_COLORS = {
-  pending_supervisor: '#F59E0B', pending_owner:'#3B82F6',
-  returned_supervisor:'#F97316', pending_payment:'#8B5CF6',
-  completed:'#22C55E', rejected:'#EF4444',
+  open:'#F97316', pending_gestor:'#F59E0B',
+  pending_diretor:'#3B82F6', pending_financeiro:'#8B5CF6',
+  completed:'#22C55E', cancelled:'#EF4444',
 };
 
 /* ═══════════════════════ TOTVS CONFIG ═══════════════════════ */
@@ -310,13 +310,14 @@ function reducer(state, action) {
       ...r, status:action.status,
       history:[...r.history,{date:fmtDate(),actor:action.actor,action:action.label,comment:action.comment||''}]
     });
+    case 'EDIT_FIELDS': return state.map(r => r.id!==action.id ? r : {...r, ...action.fields});
     default: return state;
   }
 }
 
 /* ═══════════════════════ ATOMS ═══════════════════════ */
 function Badge({status}) {
-  const s = STATUS[status]||STATUS.pending_supervisor;
+  const s = STATUS[status]||STATUS.pending_gestor;
   return (
     <span style={{background:s.bg,color:s.text}} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap">
       <span style={{background:s.dot}} className="w-1.5 h-1.5 rounded-full flex-shrink-0"/>
@@ -399,8 +400,8 @@ function DonutChart({ data }) {
 /* ═══════════════════════ SIDEBAR ═══════════════════════ */
 function Sidebar({ user, view, setView, onLogout, onNewRequest, mobileOpen, onClose }) {
   const nav = [
-    { id:'dashboard', label:'Dashboard',     icon:I.dashboard, roles:['supervisora','dono','admin'] },
-    { id:'requests',  label:'Solicitações',  icon:I.list,      roles:['solicitante','supervisora','dono','financeiro','admin'] },
+    { id:'dashboard', label:'Dashboard',     icon:I.dashboard, roles:['gestor','diretor','financeiro','admin'] },
+    { id:'requests',  label:'Solicitações',  icon:I.list,      roles:['solicitante','gestor','diretor','financeiro','admin'] },
     { id:'admin',     label:'Usuários',      icon:I.shield,    roles:['admin'] },
   ];
   const visible = nav.filter(n => n.roles.includes(user.role));
@@ -431,7 +432,7 @@ function Sidebar({ user, view, setView, onLogout, onNewRequest, mobileOpen, onCl
           </button>
         )}
 
-        {(user.role==='supervisora'||user.role==='dono') && (
+        {(user.role==='gestor'||user.role==='diretor') && (
           <button onClick={()=>{setView('new');if(onClose)onClose();}}
             className="nav-link w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mt-3"
             style={{color:'#C9BBAA',border:'1px solid rgba(201,187,170,.3)'}}>
@@ -542,8 +543,9 @@ function LoginPage({ onLogin }) {
           <div className="flex flex-col gap-2">
             {[
               {label:'Admin',       email:'admin@grupodeep.com.br',        pw:'admin123'},
-              {label:'Dono',        email:'dono@grupodeep.com.br',         pw:'123456'},
-              {label:'Supervisora', email:'supervisora@grupodeep.com.br',  pw:'123456'},
+              {label:'Diretor',     email:'dono@grupodeep.com.br',         pw:'123456'},
+              {label:'Gestor',      email:'supervisora@grupodeep.com.br',  pw:'123456'},
+              {label:'Financeiro',  email:'financeiro@grupodeep.com.br',   pw:'123456'},
               {label:'Solicitante', email:'solicitante@grupodeep.com.br',  pw:'123456'},
             ].map(u=>(
               <button key={u.email} type="button"
@@ -563,15 +565,16 @@ function LoginPage({ onLogin }) {
 
 /* ═══════════════════════ DASHBOARD ═══════════════════════ */
 function DashboardView({ user, requests }) {
-  const base = user.role==='dono' ? requests.filter(r=>r.status!=='pending_supervisor') : requests;
+  const base = user.role==='diretor' ? requests.filter(r=>r.status!=='pending_gestor') : requests;
 
   const total = base.length;
   const totalValue = base.reduce((s,r)=>s+r.amount,0);
   const pending = base.filter(r=>
-    (user.role==='supervisora'&&r.status==='pending_supervisor')||
-    (user.role==='dono'&&r.status==='pending_owner')
+    (user.role==='gestor'&&r.status==='pending_gestor')||
+    (user.role==='diretor'&&r.status==='pending_diretor')||
+    (user.role==='financeiro'&&r.status==='pending_financeiro')
   ).length;
-  const sent = base.filter(r=>['pending_payment','completed'].includes(r.status)).length;
+  const sent = base.filter(r=>['pending_financeiro','completed'].includes(r.status)).length;
 
   // Bar chart: valor por categoria
   const byCat = CATEGORIES.map(cat=>({
@@ -602,8 +605,8 @@ function DashboardView({ user, requests }) {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         <KPI label="TOTAL DE SOLICITAÇÕES" value={total} sub="todos os status"/>
         <KPI label="VALOR TOTAL" value={R(totalValue)} sub="soma das solicitações" accent="#C9BBAA"/>
-        <KPI label="PENDENTES DE AÇÃO" value={pending} sub={user.role==='supervisora'?'aguardando sua revisão':'aguardando sua aprovação'} accent="#F59E0B"/>
-        <KPI label="ENVIADOS P/ PAGAMENTO" value={sent} sub="aprovados pelo dono" accent="#8B5CF6"/>
+        <KPI label="PENDENTES DE AÇÃO" value={pending} sub={user.role==='gestor'?'aguardando sua revisão':'aguardando sua aprovação'} accent="#F59E0B"/>
+        <KPI label="FINALIZADOS" value={sent} sub="em financeiro ou concluídos" accent="#8B5CF6"/>
       </div>
 
       {/* Charts */}
@@ -649,7 +652,8 @@ function DashboardView({ user, requests }) {
 }
 
 /* ═══════════════════════ FORM NOVA SOLICITAÇÃO ═══════════════════════ */
-function NewRequestForm({ user, requests, onSubmit, onBack }) {
+function NewRequestForm({ user, requests, onSubmit, onBack, editReq }) {
+  const isEdit = !!editReq;
   // Filtra opções por permissões do usuário ([] = todas liberadas)
   const allowedExpenses = user.allowed_expense_codes?.length > 0
     ? EXPENSE_TYPES.filter(e => user.allowed_expense_codes.includes(e.v))
@@ -658,16 +662,16 @@ function NewRequestForm({ user, requests, onSubmit, onBack }) {
     ? DOCUMENT_TYPES.filter(d => user.allowed_document_types.includes(d.v))
     : DOCUMENT_TYPES;
 
-  const [title,setTitle]           = useState('');
-  const [desc,setDesc]             = useState('');
-  const [amount,setAmount]         = useState('');
-  const [category,setCategory]     = useState('');
-  const [dueDate,setDueDate]       = useState(()=>{ const d=new Date(Date.now()+7*864e5); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; });
-  const [document,setDocument]     = useState(()=>allowedDocs[0]?.v||15);
-  const [expenseCode,setExpCode]   = useState(()=>allowedExpenses.length===1?allowedExpenses[0].v:'');
-  const [rateio,setRateio]         = useState(100);
-  const [parcelas,setParcelas]     = useState(1);
-  const [receipts,setReceipts]     = useState([]);
+  const [title,setTitle]           = useState(editReq?.title||'');
+  const [desc,setDesc]             = useState(editReq?.description||'');
+  const [amount,setAmount]         = useState(editReq?.amount?String(editReq.amount):'');
+  const [category,setCategory]     = useState(editReq?.category||'');
+  const [dueDate,setDueDate]       = useState(editReq?.totvs?.dueDate||(()=>{ const d=new Date(Date.now()+7*864e5); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })());
+  const [document,setDocument]     = useState(editReq?.totvs?.document||allowedDocs[0]?.v||15);
+  const [expenseCode,setExpCode]   = useState(editReq?.totvs?.expenseCode||(allowedExpenses.length===1?allowedExpenses[0].v:''));
+  const [rateio,setRateio]         = useState(editReq?.totvs?.proratedPercentage||100);
+  const [parcelas,setParcelas]     = useState(editReq?.totvs?.parcelas||1);
+  const [receipts,setReceipts]     = useState(editReq?.receipts||[]);
   const [errors,setErrors]         = useState({});
   const [loading,setLoading]       = useState(false);
   const fileRef = useRef();
@@ -709,32 +713,46 @@ function NewRequestForm({ user, requests, onSubmit, onBack }) {
     const e=validate(); if(Object.keys(e).length){setErrors(e);return;}
     setLoading(true);
     const today = localDateStr();
-    setTimeout(()=>onSubmit({
-      id: String(Date.now()),
-      title: title.trim(),
-      description: desc.trim(),
-      amount: parseFloat(amount.replace(',','.')),
-      category, receipts,
-      totvs: {
-        supplierCpfCnpj:    '28171353000173',
-        duplicateCode:      genDuplicateCode(),
-        bearerCode:         1020,
-        issueDate:          today,
-        dueDate:            dueDate,
-        arrivalDate:        today,
-        document:           parseInt(document),
-        prevision:          2,
-        stage:              1,
-        expenseCode:        parseInt(expenseCode),
-        costCenterCode:     1,
-        proratedPercentage: parseFloat(rateio)||100,
-        observation:        desc.trim(),
-        parcelas:           parseInt(parcelas)||1,
-      },
-      status:'pending_supervisor', solicitanteId:user.id, solicitanteName:user.name,
-      created_at: fmtDate(),
-      history:[{date:fmtDate(),actor:user.name,action:'Solicitação criada e enviada para revisão da supervisora',comment:''}]
-    }),400);
+    const totvsData = {
+      supplierCpfCnpj:    editReq?.totvs?.supplierCpfCnpj||'28171353000173',
+      duplicateCode:      isEdit?(editReq.totvs?.duplicateCode||genDuplicateCode()):genDuplicateCode(),
+      bearerCode:         editReq?.totvs?.bearerCode||1020,
+      issueDate:          today,
+      dueDate:            dueDate,
+      arrivalDate:        today,
+      document:           parseInt(document),
+      prevision:          2,
+      stage:              1,
+      expenseCode:        parseInt(expenseCode),
+      costCenterCode:     editReq?.totvs?.costCenterCode||1,
+      proratedPercentage: parseFloat(rateio)||100,
+      observation:        desc.trim(),
+      parcelas:           parseInt(parcelas)||1,
+    };
+    if(isEdit) {
+      setTimeout(()=>onSubmit({
+        ...editReq,
+        title: title.trim(),
+        description: desc.trim(),
+        amount: parseFloat(amount.replace(',','.')),
+        category, receipts,
+        totvs: totvsData,
+        status:'pending_gestor',
+        history:[...(editReq.history||[]),{date:fmtDate(),actor:user.name,action:'Solicitação editada e reenviada para o gestor',comment:''}]
+      }),400);
+    } else {
+      setTimeout(()=>onSubmit({
+        id: String(Date.now()),
+        title: title.trim(),
+        description: desc.trim(),
+        amount: parseFloat(amount.replace(',','.')),
+        category, receipts,
+        totvs: totvsData,
+        status:'pending_gestor', solicitanteId:user.id, solicitanteName:user.name,
+        created_at: fmtDate(),
+        history:[{date:fmtDate(),actor:user.name,action:'Solicitação criada e enviada para revisão do gestor',comment:''}]
+      }),400);
+    }
   };
 
   const F  = 'w-full px-3 py-2.5 rounded-xl text-sm transition';
@@ -756,8 +774,8 @@ function NewRequestForm({ user, requests, onSubmit, onBack }) {
           <I.back/>
         </button>
         <div>
-          <h1 className="text-xl font-bold" style={{color:'#1A1A1A'}}>Nova Solicitação</h1>
-          <p className="text-xs" style={{color:'#888'}}>Preencha os dados da despesa</p>
+          <h1 className="text-xl font-bold" style={{color:'#1A1A1A'}}>{isEdit?'Editar Solicitação':'Nova Solicitação'}</h1>
+          <p className="text-xs" style={{color:'#888'}}>{isEdit?'Corrija os dados e reenvie para o gestor':'Preencha os dados da despesa'}</p>
         </div>
       </div>
 
@@ -905,7 +923,7 @@ function NewRequestForm({ user, requests, onSubmit, onBack }) {
         <button onClick={submit} disabled={loading}
           className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-60"
           style={{background:'#0A0A0A',color:'#C9BBAA'}}>
-          {loading?<><Spinner/>Enviando...</>:'Enviar para Revisão'}
+          {loading?<><Spinner/>Enviando...</>:(isEdit?'Reenviar para o Gestor':'Enviar para Revisão')}
         </button>
       </div>
     </div>
@@ -939,31 +957,43 @@ function buildTotvsPayload(req) {
 }
 
 /* ═══════════════════════ REQUEST DETAIL ═══════════════════════ */
-function RequestDetail({ req, user, onBack, dispatch, showToast }) {
+function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
   const [modal,setModal]=useState(null);
   const [comment,setComment]=useState('');
   const [lightbox,setLightbox]=useState(null);
   const [totvsLoading, setTotvsLoading] = useState(false);
   const [totvsResult,  setTotvsResult]  = useState(null);
 
-  const isSup=user.role==='supervisora', isDono=user.role==='dono', isFinanceiro=user.role==='financeiro';
-  const canActSup  = isSup  && req.status==='pending_supervisor';
-  const canActDono = isDono && req.status==='pending_owner';
-  const canActFin  = isFinanceiro && req.status==='pending_payment';
+  const isGestor=user.role==='gestor', isDiretor=user.role==='diretor', isFinanceiro=user.role==='financeiro';
+  const isSolicitante=user.role==='solicitante';
+  const canActGestor    = isGestor    && req.status==='pending_gestor';
+  const canActDiretor   = isDiretor   && req.status==='pending_diretor';
+  const canActFin       = isFinanceiro && req.status==='pending_financeiro';
+  const canEditReturn   = isSolicitante && req.status==='open';
 
   const approve = () => {
-    dispatch({type:'UPDATE',id:req.id,status:'pending_owner',actor:user.name,label:'Aprovado pela supervisora — enviado para aprovação do dono',comment});
-    showToast('Solicitação aprovada e enviada ao dono!','ok'); onBack();
+    if(isGestor) {
+      dispatch({type:'UPDATE',id:req.id,status:'pending_diretor',actor:user.name,
+        label:'Aprovado pelo gestor — enviado para aprovação do diretor',comment});
+      showToast('Aprovado e enviado ao diretor!','ok');
+    } else if(isDiretor) {
+      dispatch({type:'UPDATE',id:req.id,status:'pending_financeiro',actor:user.name,
+        label:'Aprovado pelo diretor — enviado ao financeiro para revisão',comment});
+      showToast('Aprovado e enviado ao financeiro!','ok');
+    }
+    onBack();
   };
   const reject = () => {
     if(!comment.trim())return;
-    if(isDono){
-      dispatch({type:'UPDATE',id:req.id,status:'returned_supervisor',actor:user.name,
-        label:'Recusado pelo dono — devolvido para supervisora e solicitante',comment});
-    } else {
-      dispatch({type:'UPDATE',id:req.id,status:'rejected',actor:user.name,label:'Recusado pela supervisora',comment});
-    }
-    showToast('Solicitação recusada.','err'); onBack();
+    const who = isGestor?'gestor':isDiretor?'diretor':'financeiro';
+    dispatch({type:'UPDATE',id:req.id,status:'open',actor:user.name,
+      label:`Devolvido pelo ${who} — retornou ao solicitante`,comment});
+    showToast('Solicitação devolvida ao solicitante.','err'); onBack();
+  };
+  const cancelReq = () => {
+    dispatch({type:'UPDATE',id:req.id,status:'cancelled',actor:user.name,
+      label:'Solicitação cancelada pelo solicitante',comment:''});
+    showToast('Solicitação cancelada.','err'); onBack();
   };
 
   const t = req.totvs || {};
@@ -1033,8 +1063,8 @@ function RequestDetail({ req, user, onBack, dispatch, showToast }) {
   };
 
   const finalizePay = () => {
-    dispatch({type:'UPDATE',id:req.id,status:'pending_payment',actor:user.name,
-      label:'Aprovado pelo dono — lançado no sistema de contas a pagar (TOTVS)',comment:''});
+    dispatch({type:'UPDATE',id:req.id,status:'completed',actor:user.name,
+      label:'Aprovado pelo financeiro — lançado no sistema de contas a pagar (TOTVS)',comment:''});
     showToast('Lançado no contas a pagar!','ok'); onBack();
   };
 
@@ -1117,37 +1147,54 @@ function RequestDetail({ req, user, onBack, dispatch, showToast }) {
             </div>
           )}
 
-          {/* Actions */}
-          {(canActSup||canActDono)&&(
+          {/* Actions — Gestor ou Diretor */}
+          {(canActGestor||canActDiretor)&&(
             <div className="flex gap-2">
               <button onClick={()=>{setComment('');setModal('reject');}} className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95" style={{border:'2px solid #FECACA',color:'#DC2626',background:'#FEF2F2'}} onMouseEnter={e=>e.currentTarget.style.background='#FEE2E2'} onMouseLeave={e=>e.currentTarget.style.background='#FEF2F2'}>
-                Recusar
+                Devolver
               </button>
-              {canActSup&&(
-                <button onClick={()=>{setComment('');setModal('approve');}} className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95" style={{background:'#0A0A0A',color:'#C9BBAA'}}>
-                  Aprovar
-                </button>
-              )}
-              {canActDono&&(
-                <button onClick={()=>{
-                  setModal('payment');
-                  // Se já foi enviado ao TOTVS antes, pula direto para confirmar
-                  if(req.sent_to_totvs) setTotvsResult({ok:true, warn:true, msg:'Lançamento já registrado no TOTVS. Confirme para atualizar o status.'});
-                  else setTotvsResult(null);
-                }} className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95 flex items-center justify-center gap-1.5" style={{background:'#0A0A0A',color:'#C9BBAA'}}>
-                  <I.send/> {req.sent_to_totvs?'Confirmar Pagamento':'Enviar p/ Pagamento'}
-                </button>
-              )}
+              <button onClick={()=>{setComment('');setModal('approve');}} className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95" style={{background:'#0A0A0A',color:'#C9BBAA'}}>
+                {isGestor?'Aprovar → Diretor':'Aprovar → Financeiro'}
+              </button>
             </div>
           )}
+
+          {/* Actions — Financeiro */}
           {canActFin&&(
-            <button onClick={()=>{
-              dispatch({type:'UPDATE',id:req.id,status:'completed',actor:user.name,label:'Pagamento confirmado pelo financeiro',comment:''});
-              showToast('Pagamento marcado como concluído!','ok'); onBack();
-            }} className="w-full py-3 rounded-xl text-sm font-semibold transition-all active:scale-95 flex items-center justify-center gap-2"
-              style={{background:'#15803D',color:'#fff'}}>
-              <I.check/> Marcar como Pago
-            </button>
+            <div className="flex gap-2">
+              <button onClick={()=>{setComment('');setModal('reject');}} className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95" style={{border:'2px solid #FECACA',color:'#DC2626',background:'#FEF2F2'}} onMouseEnter={e=>e.currentTarget.style.background='#FEE2E2'} onMouseLeave={e=>e.currentTarget.style.background='#FEF2F2'}>
+                Devolver
+              </button>
+              <button onClick={()=>{
+                setModal('payment');
+                if(req.sent_to_totvs) setTotvsResult({ok:true, warn:true, msg:'Lançamento já registrado no TOTVS. Confirme para concluir.'});
+                else setTotvsResult(null);
+              }} className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95 flex items-center justify-center gap-1.5" style={{background:'#0A0A0A',color:'#C9BBAA'}}>
+                <I.send/> {req.sent_to_totvs?'Confirmar Lançamento':'Lançar no TOTVS'}
+              </button>
+            </div>
+          )}
+
+          {/* Actions — Solicitante (devolvido) */}
+          {canEditReturn&&(
+            <div className="rounded-xl p-4 space-y-3" style={{background:'#FFF7ED',border:'1px solid #FED7AA'}}>
+              <div className="flex items-start gap-2 text-sm" style={{color:'#92400E'}}>
+                <svg width="16" height="16" className="flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path strokeLinecap="round" d="M12 8v4m0 4h.01"/></svg>
+                <span>Sua solicitação foi devolvida. Veja o motivo no histórico, edite os dados e reenvie, ou cancele-a.</span>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={()=>{if(window.confirm('Cancelar esta solicitação definitivamente?'))cancelReq();}}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all active:scale-95"
+                  style={{border:'2px solid #FECACA',color:'#DC2626',background:'#FEF2F2'}}>
+                  Cancelar
+                </button>
+                <button onClick={()=>onEdit(req)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+                  style={{background:'#0A0A0A',color:'#C9BBAA'}}>
+                  Editar e Reenviar
+                </button>
+              </div>
+            </div>
           )}
         </div>
 
@@ -1185,7 +1232,10 @@ function RequestDetail({ req, user, onBack, dispatch, showToast }) {
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 overlay" style={{background:'rgba(0,0,0,.5)'}}>
           <div className="w-full max-w-sm rounded-2xl p-5 slide-up" style={{background:'#fff'}}>
             <p className="font-bold mb-1" style={{color:'#1A1A1A'}}>Confirmar Aprovação</p>
-            <p className="text-sm mb-3" style={{color:'#888'}}>A solicitação será enviada para o dono aprovar.</p>
+            <p className="text-sm mb-3" style={{color:'#888'}}>
+              {isGestor?'A solicitação será enviada para o Diretor aprovar.':
+               isDiretor?'A solicitação será enviada ao Financeiro para revisão.':'Confirmar aprovação.'}
+            </p>
             <textarea value={comment} onChange={e=>setComment(e.target.value)} rows={2} placeholder="Comentário opcional..."
               className="w-full px-3 py-2 rounded-xl text-sm resize-none mb-3" style={{background:'#F7F6F3',border:'1px solid #E0D9D0',color:'#1A1A1A'}}/>
             <div className="flex gap-2">
@@ -1199,22 +1249,20 @@ function RequestDetail({ req, user, onBack, dispatch, showToast }) {
       {modal==='reject'&&(
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 overlay" style={{background:'rgba(0,0,0,.5)'}}>
           <div className="w-full max-w-sm rounded-2xl p-5 slide-up" style={{background:'#fff'}}>
-            <p className="font-bold mb-1" style={{color:'#1A1A1A'}}>Recusar Solicitação</p>
-            <p className="text-sm mb-3" style={{color:'#888'}}>Informe o motivo da recusa.</p>
+            <p className="font-bold mb-1" style={{color:'#1A1A1A'}}>Devolver Solicitação</p>
+            <p className="text-sm mb-3" style={{color:'#888'}}>Informe o motivo. A solicitação voltará ao solicitante.</p>
             <textarea value={comment} onChange={e=>setComment(e.target.value)} rows={3} placeholder="Motivo obrigatório..."
               className="w-full px-3 py-2 rounded-xl text-sm resize-none mb-3" style={{background:'#F7F6F3',border:'1px solid #E0D9D0',color:'#1A1A1A'}}/>
-            {isDono&&(
-              <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl text-xs" style={{background:'#FFF7ED',border:'1px solid #FED7AA',color:'#C2410C'}}>
-                <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path strokeLinecap="round" d="M12 8v4m0 4h.01"/></svg>
-                A recusa ficará visível para a supervisora e para o solicitante.
-              </div>
-            )}
+            <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl text-xs" style={{background:'#FFF7ED',border:'1px solid #FED7AA',color:'#C2410C'}}>
+              <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path strokeLinecap="round" d="M12 8v4m0 4h.01"/></svg>
+              O solicitante verá o motivo e poderá editar e reenviar.
+            </div>
             <div className="flex gap-2">
               <button onClick={()=>setModal(null)} className="flex-1 py-2.5 rounded-xl text-sm font-medium" style={{border:'1px solid #E0D9D0',color:'#666'}}>Cancelar</button>
               <button onClick={()=>{if(comment.trim())reject();}}
                 className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition"
                 style={{background:comment.trim()?'#DC2626':'#FCA5A5',color:'#fff',cursor:comment.trim()?'pointer':'not-allowed'}}>
-                Recusar
+                Devolver
               </button>
             </div>
           </div>
@@ -1334,89 +1382,57 @@ function SolicitacoesView({ user, requests, onSelect, onNew, dispatch, showToast
   const [bulkLoading,setBulkLoading]=useState(false);
   const [bulkProgress,setBulkProgress]=useState(null);
 
-  const isSup  = user.role==='supervisora';
-  const isDono = user.role==='dono';
+  const isGestorList    = user.role==='gestor';
+  const isDiretorList   = user.role==='diretor';
+  const isFinanceiroList = user.role==='financeiro';
 
   let base = requests;
-  if(user.role==='solicitante') base=requests.filter(r=>r.solicitanteId===user.id);
-  if(user.role==='dono')        base=requests.filter(r=>r.status!=='pending_supervisor'||r.solicitanteId===user.id);
+  if(user.role==='solicitante')  base=requests.filter(r=>r.solicitanteId===user.id);
+  if(user.role==='diretor')      base=requests.filter(r=>r.status!=='pending_gestor'||r.solicitanteId===user.id);
+  if(user.role==='financeiro')   base=requests.filter(r=>['pending_financeiro','completed','cancelled','open'].includes(r.status)||r.solicitanteId===user.id);
 
   const filtered = base
     .filter(r=>filter==='all'||r.status===filter)
     .filter(r=>!search||r.title.toLowerCase().includes(search.toLowerCase())||(r.solicitanteName||'').toLowerCase().includes(search.toLowerCase()));
 
   // Quais linhas podem ser selecionadas
-  const canSelect = r => (isSup&&r.status==='pending_supervisor')||(isDono&&r.status==='pending_owner');
+  const canSelect = r => (isGestorList&&r.status==='pending_gestor')||(isDiretorList&&r.status==='pending_diretor');
   const eligible  = filtered.filter(canSelect);
   const allSelected = eligible.length>0 && eligible.every(r=>selected.has(r.id));
 
   const toggleRow = id => setSelected(p=>{ const s=new Set(p); s.has(id)?s.delete(id):s.add(id); return s; });
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(eligible.map(r=>r.id)));
 
-  /* ── Aprovação em lote: supervisora ── */
-  const bulkApproveSup = () => {
-    if(!window.confirm(`Aprovar ${selected.size} solicitação${selected.size!==1?'ões':''} e enviar ao dono?`)) return;
+  /* ── Aprovação em lote: gestor → diretor ── */
+  const bulkApproveGestor = () => {
+    if(!window.confirm(`Aprovar ${selected.size} solicitação${selected.size!==1?'ões':''} e enviar ao diretor?`)) return;
     for(const id of [...selected]){
-      dispatch({type:'UPDATE',id,status:'pending_owner',actor:user.name,label:'Aprovado em lote pela supervisora',comment:''});
+      dispatch({type:'UPDATE',id,status:'pending_diretor',actor:user.name,label:'Aprovado em lote pelo gestor — enviado ao diretor',comment:''});
     }
     showToast(`${selected.size} solicitação${selected.size!==1?'ões':''} aprovada${selected.size!==1?'s':''}!`);
     setSelected(new Set());
   };
 
-  /* ── Aprovação em lote: dono → TOTVS ── */
-  const bulkApproveDono = async () => {
-    if(!window.confirm(`Aprovar ${selected.size} solicitação${selected.size!==1?'ões':''} e lançar no TOTVS?`)) return;
-    setBulkLoading(true);
-    const ids=[...selected];
-
-    // Autentica uma vez
-    let token;
-    try {
-      const authBody=new URLSearchParams({Grant_type:'password',Client_id:'deepapiv2',Client_secret:'4270929817',Username:'ECOMM',Password:'1995'});
-      const ar=await fetch('https://www30.bhan.com.br:9443/api/totvsmoda/authorization/v2/token',
-        {method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'},body:authBody});
-      if(!ar.ok) throw new Error(`Auth ${ar.status}`);
-      const ad=await ar.json();
-      token=ad.access_token||ad.token||ad.accessToken;
-      if(!token) throw new Error('Token vazio');
-    } catch(e){
-      showToast('Falha na autenticação TOTVS','err');
-      setBulkLoading(false); return;
+  /* ── Aprovação em lote: diretor → financeiro ── */
+  const bulkApproveDiretor = () => {
+    if(!window.confirm(`Aprovar ${selected.size} solicitação${selected.size!==1?'ões':''} e enviar ao financeiro?`)) return;
+    for(const id of [...selected]){
+      dispatch({type:'UPDATE',id,status:'pending_financeiro',actor:user.name,label:'Aprovado em lote pelo diretor — enviado ao financeiro',comment:''});
     }
-
-    let ok=0,fail=0;
-    for(let i=0;i<ids.length;i++){
-      setBulkProgress({current:i+1,total:ids.length});
-      const req=requests.find(r=>r.id===ids[i]);
-      if(!req){fail++;continue;}
-      try{
-        const res=await fetch(TOTVS_API,{
-          method:'POST',
-          headers:{'Content-Type':'application/json','Accept':'application/json','Authorization':`Bearer ${token}`},
-          body:JSON.stringify(buildTotvsPayload(req)),
-        });
-        if(res.ok){
-          dispatch({type:'MARK_SENT',id:req.id});
-          dispatch({type:'UPDATE',id:req.id,status:'pending_payment',actor:user.name,label:'Aprovado em lote pelo dono — lançado no TOTVS',comment:''});
-          sbUpdate('requests',{sent_to_totvs:true},`?id=eq.${req.id}`).catch(()=>{});
-          ok++;
-        } else { fail++; }
-      } catch{ fail++; }
-    }
-
-    setBulkLoading(false); setBulkProgress(null); setSelected(new Set());
-    if(fail===0) showToast(`${ok} lançada${ok!==1?'s':''} no TOTVS com sucesso!`);
-    else showToast(`${ok} ok, ${fail} com erro — verifique individualmente`,'err');
+    showToast(`${selected.size} solicitação${selected.size!==1?'ões':''} aprovada${selected.size!==1?'s':''}!`);
+    setSelected(new Set());
   };
 
   const FILTERS = [
     {v:'all',l:'Todas'},
-    ...(isSup?[{v:'pending_supervisor',l:'Para Revisar'}]:[]),
-    ...(isDono?[{v:'pending_owner',l:'Para Aprovar'}]:[]),
-    {v:'pending_payment',l:'Em Pagamento'},
-    {v:'rejected',l:'Recusadas'},
-    {v:'returned_supervisor',l:'Devolvidas'},
-  ];
+    ...(isGestorList?[{v:'pending_gestor',l:'Para Revisar'}]:[]),
+    ...(isDiretorList?[{v:'pending_diretor',l:'Para Aprovar'}]:[]),
+    ...(isFinanceiroList?[{v:'pending_financeiro',l:'Para Finalizar'}]:[]),
+    {v:'open',l:'Devolvidas'},
+    {v:'pending_financeiro',l:'No Financeiro'},
+    {v:'completed',l:'Concluídas'},
+    {v:'cancelled',l:'Canceladas'},
+  ].filter((f,i,arr)=>arr.findIndex(x=>x.v===f.v)===i); // deduplica
 
   return (
     <div className="fade">
@@ -1447,8 +1463,8 @@ function SolicitacoesView({ user, requests, onSelect, onNew, dispatch, showToast
       </div>
 
       {/* Table header (desktop) */}
-      <div className="hidden md:grid gap-3 px-4 py-2 mb-1 text-xs font-bold" style={{color:'#AAA',letterSpacing:'0.07em',gridTemplateColumns:(isSup||isDono)?'24px 1fr 1fr 1fr auto auto 24px':'1fr 1fr 1fr auto auto 24px'}}>
-        {(isSup||isDono)&&(
+      <div className="hidden md:grid gap-3 px-4 py-2 mb-1 text-xs font-bold" style={{color:'#AAA',letterSpacing:'0.07em',gridTemplateColumns:(isGestorList||isDiretorList)?'24px 1fr 1fr 1fr auto auto 24px':'1fr 1fr 1fr auto auto 24px'}}>
+        {(isGestorList||isDiretorList)&&(
           <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{accentColor:'#0A0A0A',cursor:'pointer'}} title="Selecionar todas elegíveis"/>
         )}
         <div>TÍTULO</div>
@@ -1477,8 +1493,8 @@ function SolicitacoesView({ user, requests, onSelect, onNew, dispatch, showToast
               onMouseLeave={e=>{if(!selected.has(r.id)){e.currentTarget.style.borderColor='#EDE8E3';e.currentTarget.style.boxShadow='none'}}}>
               {/* Desktop row */}
               <div className="hidden md:grid gap-3 px-4 py-3.5 items-center"
-                style={{gridTemplateColumns:(isSup||isDono)?'24px 1fr 1fr 1fr auto auto 24px':'1fr 1fr 1fr auto auto 24px'}}>
-                {(isSup||isDono)&&(
+                style={{gridTemplateColumns:(isGestorList||isDiretorList)?'24px 1fr 1fr 1fr auto auto 24px':'1fr 1fr 1fr auto auto 24px'}}>
+                {(isGestorList||isDiretorList)&&(
                   <input type="checkbox"
                     checked={selected.has(r.id)}
                     disabled={!canSelect(r)}
@@ -1498,7 +1514,7 @@ function SolicitacoesView({ user, requests, onSelect, onNew, dispatch, showToast
               </div>
               {/* Mobile card */}
               <div className="md:hidden p-4 flex gap-3 items-start" onClick={()=>onSelect(r.id)}>
-                {(isSup||isDono)&&canSelect(r)&&(
+                {(isGestorList||isDiretorList)&&canSelect(r)&&(
                   <input type="checkbox" checked={selected.has(r.id)}
                     onChange={e=>{e.stopPropagation();toggleRow(r.id);}}
                     onClick={e=>e.stopPropagation()}
@@ -1529,13 +1545,13 @@ function SolicitacoesView({ user, requests, onSelect, onNew, dispatch, showToast
           </span>
           <div className="w-px h-4 flex-shrink-0" style={{background:'#333'}}/>
           <button
-            onClick={isSup?bulkApproveSup:bulkApproveDono}
+            onClick={isGestorList?bulkApproveGestor:bulkApproveDiretor}
             disabled={bulkLoading}
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all active:scale-95 disabled:opacity-60"
             style={{background:'#C9BBAA',color:'#0A0A0A'}}>
             {bulkLoading
               ? <><svg className="spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#0A0A0A" strokeWidth="3" strokeDasharray="60" strokeDashoffset="15"/></svg>
-                  {bulkProgress?`Enviando ${bulkProgress.current}/${bulkProgress.total}...`:'Processando...'}</>
+                  Processando...</>
               : <><I.check/> Aprovar {selected.size}</>
             }
           </button>
@@ -1582,7 +1598,7 @@ function AdminView({ showToast }) {
     } catch{ showToast('Erro ao remover','err'); }
   };
 
-  const ROLE_COLOR = {admin:'#8B5CF6',supervisora:'#3B82F6',dono:'#F59E0B',financeiro:'#22C55E',solicitante:'#888'};
+  const ROLE_COLOR = {admin:'#8B5CF6',gestor:'#3B82F6',diretor:'#F59E0B',financeiro:'#22C55E',solicitante:'#888'};
 
   return (
     <div className="fade">
@@ -1819,6 +1835,7 @@ function App() {
   const [user,setUser]=useState(null);
   const [view,setView]=useState('dashboard');
   const [selected,setSelected]=useState(null);
+  const [editingReq,setEditingReq]=useState(null);
   const [toast,setToast]=useState(null);
   const [menuOpen,setMenuOpen]=useState(false);
   const [appLoading,setAppLoading]=useState(false);
@@ -1852,10 +1869,32 @@ function App() {
     await loadRequests();
   };
 
+  const handleUpdate = async (updatedReq) => {
+    // Atualiza campos editáveis no state local
+    dispatch({type:'EDIT_FIELDS', id:updatedReq.id, fields:{
+      title:updatedReq.title, description:updatedReq.description,
+      amount:updatedReq.amount, category:updatedReq.category,
+      totvs:updatedReq.totvs, receipts:updatedReq.receipts,
+      status:'pending_gestor', history:updatedReq.history,
+    }});
+    setEditingReq(null);
+    setView('requests');
+    showToast('Solicitação reenviada para o gestor!');
+    try {
+      await sbUpdate('requests',{
+        title:updatedReq.title, description:updatedReq.description,
+        amount:updatedReq.amount, category:updatedReq.category,
+        totvs:updatedReq.totvs, receipts:updatedReq.receipts,
+        status:'pending_gestor', history:updatedReq.history,
+        updated_at:new Date().toISOString(),
+      },`?id=eq.${updatedReq.id}`);
+    } catch(e){ showToast('Aviso: erro ao salvar no banco','err'); }
+  };
+
   const handleSubmit = async (req) => {
     dispatch({type:'ADD',req});
     setView('requests');
-    showToast('Solicitacao enviada para a supervisora!');
+    showToast('Solicitação enviada para o gestor!');
     try {
       await sbInsert('requests',{
         id:req.id, title:req.title,
@@ -1926,7 +1965,8 @@ function App() {
               {view==='dashboard' && <DashboardView user={user} requests={requests}/>}
               {view==='requests'  && <SolicitacoesView user={user} requests={requests} onSelect={id=>{setSelected(id);setView('detail');}} onNew={()=>setView('new')} dispatch={syncDispatch} showToast={showToast}/>}
               {view==='new'       && <NewRequestForm user={user} requests={requests} onSubmit={handleSubmit} onBack={()=>setView('requests')}/>}
-              {view==='detail'&&selectedReq && <RequestDetail req={selectedReq} user={user} onBack={()=>setView('requests')} dispatch={syncDispatch} showToast={showToast}/>}
+              {view==='edit'      && <NewRequestForm user={user} requests={requests} editReq={editingReq} onSubmit={handleUpdate} onBack={()=>{setEditingReq(null);setView('detail');}}/>}
+              {view==='detail'&&selectedReq && <RequestDetail req={selectedReq} user={user} onBack={()=>setView('requests')} dispatch={syncDispatch} showToast={showToast} onEdit={r=>{setEditingReq(r);setView('edit');}}/>}
               {view==='admin'     && <AdminView showToast={showToast}/>}
             </>
           )}
