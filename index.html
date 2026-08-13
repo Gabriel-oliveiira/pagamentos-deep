@@ -1315,6 +1315,10 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
     else if(cvDue <= localDateStr()) e.due='O vencimento deve ser posterior a hoje';
     const cvExpSum = cvExpenses.reduce((s,ex)=>s+(parseFloat(ex.valor)||0),0);
     const cvTotalVal = parseFloat(cvAmount.replace(',','.'));
+    // Trava de valor: não pode ultrapassar o valor aprovado pelo diretor (só reduzir)
+    const teto = parseFloat(req.valor_aprovado);
+    if(!isNaN(teto) && !isNaN(cvTotalVal) && cvTotalVal > teto + 0.001)
+      e.amount=`O valor não pode ultrapassar o aprovado pelo diretor (${R(teto)}). Só é permitido reduzir.`;
     if(cvExpenses.some(ex=>!ex.expenseCode)) e.exp='Selecione o tipo de cada despesa';
     if(cvExpenses.some(ex=>!ex.costCenterCode)) e.exp=e.exp||'Selecione o centro de custo de cada despesa';
     if(cvExpenses.some(ex=>!(parseFloat(ex.valor)>0))) e.expValor='Informe o valor de cada despesa';
@@ -1673,6 +1677,8 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                       <input value={cvAmount} onChange={e=>setCvAmount(e.target.value)} placeholder="0,00"
                         className={F2} style={FS2(cvErr.amount)}
                         onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor=cvErr.amount?'#EF4444':'#E0D9D0'}/>
+                      {!isNaN(parseFloat(req.valor_aprovado)) && !cvErr.amount &&
+                        <p className="text-xs mt-1" style={{color:'#A9A29B'}}>Máx. aprovado: {R(parseFloat(req.valor_aprovado))} — só é permitido reduzir</p>}
                       <Err2 msg={cvErr.amount}/>
                     </div>
                     <div>
