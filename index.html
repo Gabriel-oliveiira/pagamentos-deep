@@ -393,7 +393,7 @@ function reducer(state, action) {
     });
     case 'EDIT_FIELDS': return state.map(r => r.id!==action.id ? r : {...r, ...action.fields});
     case 'CONVERT': return state.map(r => r.id!==action.id ? r : {
-      ...r, status:'pending_gestor',
+      ...r, status: action.status||'pending_gestor',
       amount: action.amount,
       totvs: action.totvs,
       servico_convertido: true,
@@ -535,15 +535,7 @@ function Sidebar({ user, view, setView, onLogout, onNewRequest, mobileOpen, onCl
           </button>
         ))}
 
-        {user.role==='solicitante' && (
-          <button onClick={()=>{setView('new');if(onClose)onClose();}}
-            className="nav-link w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mt-3"
-            style={{color:'#C9BBAA',border:'1px solid rgba(201,187,170,.3)'}}>
-            <I.plus/> Nova Solicitação
-          </button>
-        )}
-
-        {(user.role==='gestor'||user.role==='diretor') && (
+        {(user.role==='solicitante'||user.role==='gestor') && (
           <button onClick={()=>{setView('new');if(onClose)onClose();}}
             className="nav-link w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mt-3"
             style={{color:'#C9BBAA',border:'1px solid rgba(201,187,170,.3)'}}>
@@ -958,21 +950,25 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
         parcelas:           plist.length,
         parcelasList:       plist,
       };
+      // Gestor que cria pagamento não tem gestor acima → vai direto ao diretor (sempre, independe do valor)
+      const gestorCriador = user.role==='gestor';
+      const payStatus = gestorCriador ? 'pending_diretor' : 'pending_gestor';
+      const payMsg = gestorCriador ? 'ao diretor' : 'para revisão do gestor';
       if(isEdit) {
         setTimeout(()=>onSubmit({
           ...editReq, title:title.trim(), description:desc.trim(),
           amount:val, category, receipts, totvs:totvsData, chave_pix:chavePix, favorecido:favorecido.trim(),
-          status:'pending_gestor',
-          history:[...(editReq.history||[]),{date:fmtDate(),actor:user.name,action:'Solicitação editada e reenviada para o gestor',comment:''}]
+          status:payStatus,
+          history:[...(editReq.history||[]),{date:fmtDate(),actor:user.name,action:`Solicitação editada e reenviada ${payMsg}`,comment:''}]
         }),400);
       } else {
         setTimeout(()=>onSubmit({
           id:String(Date.now()), tipo:'pagamento',
           title:title.trim(), description:desc.trim(),
           amount:val, category, receipts, totvs:totvsData, chave_pix:chavePix, favorecido:favorecido.trim(),
-          status:'pending_gestor', solicitanteId:user.id, solicitanteName:user.name,
+          status:payStatus, solicitanteId:user.id, solicitanteName:user.name,
           created_at:fmtDate(),
-          history:[{date:fmtDate(),actor:user.name,action:'Pagamento solicitado e enviado para revisão do gestor',comment:''}]
+          history:[{date:fmtDate(),actor:user.name,action:`Pagamento solicitado e enviado ${payMsg}`,comment:''}]
         }),400);
       }
     } else {
@@ -1352,8 +1348,9 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
   const canActGestor  = isGestor    && req.status==='pending_gestor';
   const canActDiretor = isDiretor   && req.status==='pending_diretor';
   const canActFin     = isFinanceiro && req.status==='pending_financeiro';
-  const canEditReturn = isSolicitante && req.status==='open';
-  const canConvert    = isSolicitante && req.status==='servico_aprovado' && req.solicitanteId===user.id;
+  // Quem criou a solicitação pode editar/converter (solicitante OU gestor que criou)
+  const canEditReturn = req.status==='open' && req.solicitanteId===user.id;
+  const canConvert    = req.status==='servico_aprovado' && req.solicitanteId===user.id;
 
   // Texto do botão de aprovar do Gestor depende do tipo/valor
   const gestorApproveTarget = () => {
@@ -1447,21 +1444,24 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
       parcelasList:cvPlist,
     };
     const cvReceiptsClean = (cvReceipts||[]).map(r=>({name:r.name,type:r.type,data:r.data}));
+    // Se quem converte é gestor (criador), não há gestor acima → vai direto ao diretor
+    const convStatus = user.role==='gestor' ? 'pending_diretor' : 'pending_gestor';
+    const convDest   = user.role==='gestor' ? 'diretor' : 'gestor';
     dispatch({type:'CONVERT',id:req.id,
       amount:parseFloat(cvAmount.replace(',','.')),
       totvs:totvsData, description:cvObs.trim(), receipts:cvReceiptsClean,
-      chave_pix:cvPix, favorecido:cvFavorecido.trim(),
+      chave_pix:cvPix, favorecido:cvFavorecido.trim(), status:convStatus,
       actor:user.name, comment:cvPix?`Chave PIX: ${cvPix}`:''
     });
     // Salva no registro
     sbUpdate('requests',{
       chave_pix:cvPix, favorecido:cvFavorecido.trim(), amount:parseFloat(cvAmount.replace(',','.')),
       description:cvObs.trim(), receipts:cvReceiptsClean,
-      totvs:totvsData, status:'pending_gestor', servico_convertido:true,
-      history:[...(req.history||[]),{date:fmtDate(),actor:user.name,action:'Serviço concluído — convertido para pagamento e enviado ao gestor',comment:cvPix?`Chave PIX: ${cvPix}`:''}],
+      totvs:totvsData, status:convStatus, servico_convertido:true,
+      history:[...(req.history||[]),{date:fmtDate(),actor:user.name,action:`Serviço concluído — convertido para pagamento e enviado ao ${convDest}`,comment:cvPix?`Chave PIX: ${cvPix}`:''}],
       updated_at:new Date().toISOString(),
     },`?id=eq.${req.id}`).catch(()=>{});
-    showToast('Convertido para pagamento e enviado ao gestor!','ok');
+    showToast(`Convertido para pagamento e enviado ao ${convDest}!`,'ok');
     setModal(null);
     onBack();
   };
@@ -2232,9 +2232,11 @@ ${rows.map((r,i)=>`<tr>
             <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" d="M7 21H17a2 2 0 002-2V9.414a1 1 0 00-.293-.707L13.293 3.293A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2zM9 15h6m-6-4h6m-2-4h2"/></svg>
             PDF
           </button>
-          <button onClick={onNew} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95" style={{background:'#282425',color:'#C9BBAA'}}>
-            <I.plus/> Nova
-          </button>
+          {(user.role==='solicitante'||user.role==='gestor') && (
+            <button onClick={onNew} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95" style={{background:'#282425',color:'#C9BBAA'}}>
+              <I.plus/> Nova
+            </button>
+          )}
         </div>
       </div>
 
@@ -3022,7 +3024,7 @@ function App() {
   const handleUpdate = async (updatedReq) => {
     const newStatus = updatedReq.status || 'pending_gestor';
     const toastMsg  = newStatus === 'pending_diretor'
-      ? 'Serviço reenviado ao diretor!'
+      ? 'Reenviado ao diretor!'
       : 'Reenviado ao gestor!';
     dispatch({type:'EDIT_FIELDS', id:updatedReq.id, fields:{
       title:updatedReq.title, description:updatedReq.description,
@@ -3050,7 +3052,7 @@ function App() {
   const handleSubmit = async (req) => {
     dispatch({type:'ADD',req});
     setView(req.tipo==='servico'?'servicos':'pagamentos');
-    const msg = req.tipo==='servico'?'Serviço enviado ao diretor!':'Solicitação enviada para o gestor!';
+    const msg = req.tipo==='servico'?'Serviço enviado ao diretor!':(req.status==='pending_diretor'?'Pagamento enviado ao diretor!':'Solicitação enviada para o gestor!');
     showToast(msg);
     try {
       await sbInsert('requests',{
