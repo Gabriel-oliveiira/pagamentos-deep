@@ -1096,7 +1096,7 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
           <div className="rounded-xl p-3" style={{background:'#FEF7ED',border:'1px solid #FED7AA'}}>
             <div className="flex items-start gap-2 text-xs mb-2" style={{color:'#92400E'}}>
               <svg width="15" height="15" className="flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path strokeLinecap="round" d="M12 9v4m0 4h.01"/></svg>
-              <span>Valor acima do aprovado pelo diretor (<b>{R(tetoEdit)}</b>). Ao reenviar, vai ao <b>diretor</b> para aprovar o novo valor antes de seguir.</span>
+              <span>Valor acima do aprovado pela diretoria (<b>{R(tetoEdit)}</b>). Ao reenviar, vai ao <b>diretor</b> para aprovar o novo valor antes de seguir.</span>
             </div>
             <Lbl err>MOTIVO DO AUMENTO</Lbl>
             <textarea value={increaseReason} onChange={e=>setIncreaseReason(e.target.value)} rows={2}
@@ -1878,7 +1878,7 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                       <div className="rounded-xl p-3" style={{background:'#FEF7ED',border:'1px solid #FED7AA'}}>
                         <div className="flex items-start gap-2 text-xs mb-2" style={{color:'#92400E'}}>
                           <svg width="15" height="15" className="flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path strokeLinecap="round" d="M12 9v4m0 4h.01"/></svg>
-                          <span>Valor acima do aprovado pelo diretor (<b>{R(tetoV)}</b>). Ao confirmar, a solicitação vai ao <b>diretor</b> para aprovar o novo valor antes de seguir.</span>
+                          <span>Valor acima do aprovado pela diretoria (<b>{R(tetoV)}</b>). Ao confirmar, a solicitação vai ao <b>diretor</b> para aprovar o novo valor antes de seguir.</span>
                         </div>
                         <Lbl2 c="MOTIVO DO AUMENTO" err/>
                         <textarea value={cvIncreaseReason} onChange={e=>setCvIncreaseReason(e.target.value)} rows={2}
