@@ -137,7 +137,7 @@ async function sbAdminUsers(action, payload){
 const CATEGORIES = ['Alimentação','Transporte','Material','Publicidade','Eventos','Software','Outros'];
 
 const STATUS = {
-  open:               { label:'Devolvido',            bg:'#FFF7ED', text:'#C2410C', dot:'#F97316'  },
+  open:               { label:'Devolvido',            bg:'#FFEDD5', text:'#9A3412', dot:'#EA580C'  },
   pending_gestor:     { label:'Aguard. Gestor',       bg:'#FEF3E2', text:'#B45309', dot:'#F59E0B'  },
   pending_diretor:    { label:'Aguard. Diretor',      bg:'#EFF6FF', text:'#1D4ED8', dot:'#3B82F6'  },
   servico_aprovado:   { label:'Serviço Aprovado',     bg:'#ECFDF5', text:'#047857', dot:'#10B981'  },
@@ -535,7 +535,7 @@ function Sidebar({ user, view, setView, onLogout, onNewRequest, mobileOpen, onCl
           </button>
         ))}
 
-        {(user.role==='solicitante'||user.role==='gestor') && (
+        {user.role==='solicitante' && (
           <button onClick={()=>{setView('new');if(onClose)onClose();}}
             className="nav-link w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium mt-3"
             style={{color:'#C9BBAA',border:'1px solid rgba(201,187,170,.3)'}}>
@@ -1101,7 +1101,7 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
             </div>
             <Lbl err>MOTIVO DO AUMENTO</Lbl>
             <textarea value={increaseReason} onChange={e=>setIncreaseReason(e.target.value)} rows={2}
-              placeholder="Explique por que o valor ficou acima do aprovado."
+              placeholder="Informe por que o valor ficou acima do aprovado."
               className={F+' resize-none'} style={FS(errors.increaseReason)} onFocus={onF} onBlur={onB(errors.increaseReason)}/>
             <Err msg={errors.increaseReason}/>
           </div>
@@ -1383,9 +1383,9 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
 
   // Texto do botão de aprovar do Gestor depende do tipo/valor
   const gestorApproveTarget = () => {
-    // Serviço não convertido não passa pelo gestor (segue outro fluxo); fallback ao financeiro
-    if(req.tipo==='servico' && !req.servico_convertido) return 'pending_financeiro';
-    // Pagamento OU serviço já convertido em pagamento: segue a regra de valor limite
+    // Serviço (convertido ou não): o diretor já aprovou o valor → gestor verifica e envia ao financeiro
+    if(req.tipo==='servico') return 'pending_financeiro';
+    // Pagamento direto: segue a regra de valor limite (>= threshold vai ao diretor)
     return req.amount >= threshold ? 'pending_diretor' : 'pending_financeiro';
   };
   const gestorApproveLabel = () => gestorApproveTarget()==='pending_diretor' ? 'Aprovar → Diretor' : 'Aprovar → Financeiro';
@@ -1410,11 +1410,11 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
       showToast(tgt==='pending_diretor'?'Aprovado e enviado ao diretor!':'Aprovado e enviado ao financeiro!','ok');
     } else if(isDiretor) {
       if(pendingIncrease){
-        // Aprova o aumento: vira o novo teto e segue ao financeiro
-        dispatch({type:'UPDATE',id:req.id,status:'pending_financeiro',actor:user.name,
-          label:`Aumento de valor aprovado pelo diretor (${R(tetoAprovado)} → ${R(req.amount)}) — enviado ao financeiro`,
+        // Aprova o aumento: vira o novo teto e segue ao gestor verificar
+        dispatch({type:'UPDATE',id:req.id,status:'pending_gestor',actor:user.name,
+          label:`Aumento de valor aprovado pelo diretor (${R(tetoAprovado)} → ${R(req.amount)}) — enviado ao gestor para verificar`,
           comment, fields:{valor_aprovado:req.amount}});
-        showToast('Aumento aprovado e enviado ao financeiro!','ok');
+        showToast('Aumento aprovado e enviado ao gestor!','ok');
       } else {
         const tgt = diretorApproveTarget();
         const lbl = tgt==='servico_aprovado'
@@ -1811,10 +1811,10 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
         <div className="rounded-2xl p-5" style={{background:'#fff',border:'1px solid #EDE8E3'}}>
           <p className="text-xs font-semibold mb-4" style={{color:'#AAA',letterSpacing:'0.07em'}}>HISTÓRICO</p>
           <div className="space-y-0">
-            {req.history.map((h,i)=>(
+            {[...req.history].reverse().map((h,i)=>(
               <div key={i} className="flex gap-3">
                 <div className="flex flex-col items-center">
-                  <div className="w-2.5 h-2.5 rounded-full mt-1 flex-shrink-0" style={{background:DOTS[i%DOTS.length]}}/>
+                  <div className="w-2.5 h-2.5 rounded-full mt-1 flex-shrink-0" style={{background:i===0?'#EA580C':DOTS[i%DOTS.length]}}/>
                   {i<req.history.length-1&&<div className="w-px flex-1 mt-1 mb-1" style={{background:'#F0EBE5'}}/>}
                 </div>
                 <div className="pb-4 flex-1 min-w-0">
@@ -1883,7 +1883,7 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                         </div>
                         <Lbl2 c="MOTIVO DO AUMENTO" err/>
                         <textarea value={cvIncreaseReason} onChange={e=>setCvIncreaseReason(e.target.value)} rows={2}
-                          placeholder="Explique por que o valor ficou acima do aprovado (ex.: a modelo ficou 2h a mais)."
+                          placeholder="Informe por que o valor ficou acima do aprovado."
                           className={F2+' resize-none'} style={FS2(cvErr.increaseReason)}
                           onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor=cvErr.increaseReason?'#EF4444':'#E0D9D0'}/>
                         <Err2 msg={cvErr.increaseReason}/>
@@ -2032,7 +2032,7 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
             <p className="font-bold mb-1" style={{color:'#1A1A1A'}}>Confirmar Aprovação</p>
             <p className="text-sm mb-3" style={{color:'#888'}}>
               {isGestor?(gestorApproveTarget()==='pending_diretor'?'A solicitação será enviada para o Diretor aprovar.':'A solicitação será enviada ao Financeiro.'):
-               isDiretor?(pendingIncrease?`Você está aprovando o novo valor de ${R(req.amount)} (antes ${R(tetoAprovado)}). Após aprovar, segue ao Financeiro.`:((req.tipo==='servico'&&!req.servico_convertido)?'O serviço será marcado como aprovado. O solicitante poderá convertê-lo em pagamento.':'A solicitação será enviada ao Financeiro para revisão.')):'Confirmar aprovação.'}
+               isDiretor?(pendingIncrease?`Você está aprovando o novo valor de ${R(req.amount)} (antes ${R(tetoAprovado)}). Após aprovar, vai ao gestor para verificar.`:((req.tipo==='servico'&&!req.servico_convertido)?'O serviço será marcado como aprovado. O solicitante poderá convertê-lo em pagamento.':'A solicitação será enviada ao Financeiro para revisão.')):'Confirmar aprovação.'}
             </p>
             <textarea value={comment} onChange={e=>setComment(e.target.value)} rows={2} placeholder="Comentário opcional..."
               className="w-full px-3 py-2 rounded-xl text-sm resize-none mb-3" style={{background:'#F7F6F3',border:'1px solid #E0D9D0',color:'#1A1A1A'}}/>
@@ -2317,7 +2317,7 @@ ${rows.map((r,i)=>`<tr>
             <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8"><path strokeLinecap="round" d="M7 21H17a2 2 0 002-2V9.414a1 1 0 00-.293-.707L13.293 3.293A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2zM9 15h6m-6-4h6m-2-4h2"/></svg>
             PDF
           </button>
-          {(user.role==='solicitante'||user.role==='gestor') && (
+          {user.role==='solicitante' && (
             <button onClick={onNew} className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95" style={{background:'#282425',color:'#C9BBAA'}}>
               <I.plus/> Nova
             </button>
@@ -2897,6 +2897,7 @@ function UserModal({ user, onClose, onSave, saving, setores=[], onAddSetor }) {
   const [restrictDoc,setRestrictDoc] = useState((user?.allowed_document_types?.length||0)>0);
   const [selDoc,setSelDoc] = useState(new Set(user?.allowed_document_types||[]));
   const [expSearch,setExpSearch] = useState('');
+  const [mustChange,setMustChange] = useState(!!user?.must_change_password);
   const [tab,setTab] = useState('info'); // 'info' | 'exp' | 'doc'
 
   const toggleExp = v => setSelExp(p=>{ const s=new Set(p); s.has(v)?s.delete(v):s.add(v); return s; });
@@ -2910,6 +2911,7 @@ function UserModal({ user, onClose, onSave, saving, setores=[], onAddSetor }) {
       role, setor:setor.trim(),
       allowed_expense_codes: restrictExp?[...selExp]:[],
       allowed_document_types: restrictDoc?[...selDoc]:[],
+      must_change_password: mustChange,
     });
   };
 
@@ -2977,8 +2979,15 @@ function UserModal({ user, onClose, onSave, saving, setores=[], onAddSetor }) {
                 </select>
               )}
             </div>
-            <div><Lbl c={user?'NOVA SENHA (deixe em branco para não alterar)':'SENHA'}/>
+            <div><Lbl c={user?'NOVA SENHA (deixe em branco para não alterar)':'SENHA PROVISÓRIA'}/>
               <input type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder={user?'••••••':''} className={inp} style={is} onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor='#E0D9D0'}/></div>
+            <label className="flex items-start gap-2.5 p-3 rounded-xl cursor-pointer" style={{background:'#F7F3EE',border:'1px solid #EDE8E3'}}>
+              <input type="checkbox" checked={mustChange} onChange={e=>setMustChange(e.target.checked)} className="mt-0.5" style={{accentColor:'#0A0A0A'}}/>
+              <span>
+                <span className="text-sm font-semibold block" style={{color:'#1A1A1A'}}>Exigir troca de senha no 1º acesso</span>
+                <span className="text-xs" style={{color:'#888'}}>O usuário define a própria senha ao entrar. Você informa só a senha provisória e não fica sabendo a definitiva.</span>
+              </span>
+            </label>
           </>)}
 
           {tab==='exp'&&(<>
@@ -3046,6 +3055,63 @@ function UserModal({ user, onClose, onSave, saving, setores=[], onAddSetor }) {
             style={{background:'#282425',color:'#C9BBAA'}}>
             {saving?<><Spinner/>Salvando...</>:'Salvar'}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════ TROCA DE SENHA NO 1º ACESSO ═══════════════════════ */
+function ForcePasswordChange({ user, onDone, onLogout }) {
+  const [pw,setPw]=useState('');
+  const [pw2,setPw2]=useState('');
+  const [err,setErr]=useState('');
+  const [loading,setLoading]=useState(false);
+  const go = async () => {
+    if(pw.length<6){setErr('A senha deve ter ao menos 6 caracteres');return;}
+    if(pw!==pw2){setErr('As senhas não conferem');return;}
+    setLoading(true); setErr('');
+    try {
+      await sbAdminUsers('set_own_password',{ password: pw });
+      onDone();
+    } catch(e){ setErr(e.message||'Erro ao salvar a senha'); setLoading(false); }
+  };
+  const inp='w-full px-4 py-3 rounded-xl text-sm transition';
+  const is={background:'#211D1E',border:'1px solid #3A3536',color:'#EAE3DA'};
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6" style={{background:'radial-gradient(1200px 600px at 50% -10%, #332E2F 0%, #282425 55%, #201C1D 100%)'}}>
+      <div className="w-full max-w-sm fade">
+        <div className="text-center mb-8">
+          <DeepLogo variant="login"/>
+          <div className="flex items-center justify-center gap-2.5 mt-5">
+            <span style={{height:'1px',width:'26px',background:'#4A4442'}}/>
+            <span style={{color:'#9A928A',fontSize:'11px',letterSpacing:'0.18em',textTransform:'uppercase'}}>Primeiro acesso</span>
+            <span style={{height:'1px',width:'26px',background:'#4A4442'}}/>
+          </div>
+        </div>
+        <div className="rounded-2xl p-7" style={{background:'rgba(42,38,39,0.6)',border:'1px solid #3A3536',backdropFilter:'blur(8px)'}}>
+          <p className="text-sm font-semibold mb-1" style={{color:'var(--bone)'}}>Olá, {user.name?.split(' ')[0]||''}</p>
+          <p className="text-xs mb-5" style={{color:'#9A928A'}}>Defina uma senha pessoal para continuar. Só você a conhecerá.</p>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium mb-2" style={{color:'#9A928A'}}>Nova senha</label>
+              <input type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="Mínimo 6 caracteres"
+                className={inp} style={is} onFocus={e=>e.target.style.borderColor='var(--hazelnut)'} onBlur={e=>e.target.style.borderColor='#3A3536'}/>
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-2" style={{color:'#9A928A'}}>Confirmar nova senha</label>
+              <input type="password" value={pw2} onChange={e=>setPw2(e.target.value)} placeholder="Repita a senha"
+                onKeyDown={e=>e.key==='Enter'&&go()}
+                className={inp} style={is} onFocus={e=>e.target.style.borderColor='var(--hazelnut)'} onBlur={e=>e.target.style.borderColor='#3A3536'}/>
+            </div>
+            {err&&<div className="flex items-center gap-2 text-xs rounded-lg px-3 py-2.5" style={{background:'rgba(220,38,38,0.12)',border:'1px solid rgba(220,38,38,0.25)',color:'#F0A0A0'}}><I.alert/>{err}</div>}
+            <button onClick={go} disabled={loading}
+              className="w-full py-3 rounded-xl text-sm font-semibold mt-1 transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-60"
+              style={{background:'var(--bone)',color:'var(--noir)'}}>
+              {loading?<><Spinner/>Salvando...</>:'Salvar e entrar'}
+            </button>
+            <button onClick={onLogout} className="w-full text-xs py-1" style={{color:'#6B655E'}}>Sair</button>
+          </div>
         </div>
       </div>
     </div>
@@ -3187,6 +3253,7 @@ function App() {
   };
 
   if(!user) return <LoginPage onLogin={handleLogin}/>;
+  if(user.must_change_password) return <ForcePasswordChange user={user} onDone={()=>setUser(u=>({...u,must_change_password:false}))} onLogout={()=>{sbSignOut();setUser(null);}}/>;
 
   const selectedReq = requests.find(r=>r.id===selected);
   const toastStyle  = toast?.type==='ok' ? {background:'#282425',color:'#C9BBAA'} : {background:'#DC2626',color:'#fff'};
