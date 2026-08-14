@@ -781,6 +781,49 @@ function DashboardView({ user, requests }) {
   );
 }
 
+/* ═══════════════════════ SELECT COM BUSCA ═══════════════════════ */
+function SearchSelect({ value, onChange, options, placeholder='Selecionar...', invalid=false }) {
+  const [open,setOpen]=useState(false);
+  const [q,setQ]=useState('');
+  const ref=useRef();
+  useEffect(()=>{
+    const h=e=>{ if(ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown',h);
+    return ()=>document.removeEventListener('mousedown',h);
+  },[]);
+  const selected = options.find(o=>String(o.value)===String(value));
+  const filtered = q.trim() ? options.filter(o=>o.label.toLowerCase().includes(q.trim().toLowerCase())) : options;
+  return (
+    <div ref={ref} style={{position:'relative'}}>
+      <div onClick={()=>{setOpen(o=>!o);setQ('');}}
+        className="w-full px-3 py-2.5 rounded-xl text-sm flex items-center justify-between gap-2"
+        style={{background:'#FAF8F5',border:`1px solid ${invalid?'#EF4444':'#E0D9D0'}`,cursor:'pointer'}}>
+        <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:selected?'#1A1A1A':'#A9A29B'}}>{selected?selected.label:placeholder}</span>
+        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#999" strokeWidth="2" style={{flexShrink:0}}><path strokeLinecap="round" d="M6 9l6 6 6-6"/></svg>
+      </div>
+      {open&&(
+        <div style={{position:'absolute',zIndex:60,left:0,right:0,top:'calc(100% + 4px)',background:'#fff',border:'1px solid #E0D9D0',borderRadius:'12px',boxShadow:'0 14px 34px -10px rgba(0,0,0,0.22)',overflow:'hidden'}}>
+          <div style={{padding:'8px'}}>
+            <input autoFocus value={q} onChange={e=>setQ(e.target.value)} placeholder="Pesquisar..."
+              className="w-full px-2.5 py-2 rounded-lg text-sm" style={{background:'#FAF8F5',border:'1px solid #E0D9D0',color:'#1A1A1A'}}/>
+          </div>
+          <div style={{maxHeight:'220px',overflowY:'auto'}}>
+            {filtered.length===0 && <div style={{padding:'10px 12px',fontSize:'13px',color:'#AAA'}}>Nenhum resultado</div>}
+            {filtered.map(o=>(
+              <div key={o.value} onClick={()=>{onChange(String(o.value));setOpen(false);setQ('');}}
+                className="px-3 py-2 text-sm cursor-pointer"
+                style={{background:String(o.value)===String(value)?'#F5F0EB':'#fff',color:'#1A1A1A'}}
+                onMouseEnter={e=>e.currentTarget.style.background='#F7F3EE'} onMouseLeave={e=>e.currentTarget.style.background=String(o.value)===String(value)?'#F5F0EB':'#fff'}>
+                {o.label}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ═══════════════════════ FORM NOVA SOLICITAÇÃO ═══════════════════════ */
 function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo='pagamento' }) {
   const isEdit = !!editReq;
@@ -1078,10 +1121,10 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
 
           <div>
             <Lbl>TIPO DE DOCUMENTO</Lbl>
-            <select value={document} onChange={e=>setDocument(e.target.value)}
-              className={F} style={{...FS(false),appearance:'none',maxWidth:'220px'}} onFocus={onF} onBlur={onB(false)}>
-              {allowedDocs.map(d=><option key={d.v} value={d.v}>{d.v} — {d.l}</option>)}
-            </select>
+            <div style={{maxWidth:'320px'}}>
+              <SearchSelect value={document} onChange={v=>setDocument(v)}
+                options={allowedDocs.map(d=>({value:d.v,label:`${d.v} — ${d.l}`}))} placeholder="Selecionar documento..."/>
+            </div>
           </div>
 
           {/* Despesas com rateio por valor */}
@@ -1097,16 +1140,12 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
                   {expenses.length>1&&<button type="button" onClick={()=>removeExpense(i)}
                     className="text-xs px-2 py-0.5 rounded-lg" style={{background:'#FEF2F2',color:'#DC2626'}}>✕ Remover</button>}
                 </div>
-                <select value={ex.expenseCode} onChange={e=>updateExpense(i,'expenseCode',e.target.value)}
-                  className={F} style={{...FS(errors.expenseCode&&!ex.expenseCode),appearance:'none'}} onFocus={onF} onBlur={onB(errors.expenseCode&&!ex.expenseCode)}>
-                  <option value="">Tipo de despesa...</option>
-                  {allowedExpenses.map(d=><option key={d.v} value={d.v}>{d.v} — {d.l}</option>)}
-                </select>
-                <select value={ex.costCenterCode} onChange={e=>updateExpense(i,'costCenterCode',e.target.value)}
-                  className={F} style={{...FS(errors.costCenter&&!ex.costCenterCode),appearance:'none'}} onFocus={onF} onBlur={onB(errors.costCenter&&!ex.costCenterCode)}>
-                  <option value="">Centro de custo...</option>
-                  {centrosCusto.map(cc=><option key={cc.codigo} value={String(cc.codigo)}>{cc.codigo} — {cc.nome}</option>)}
-                </select>
+                <SearchSelect value={ex.expenseCode} onChange={v=>updateExpense(i,'expenseCode',v)}
+                  options={allowedExpenses.map(d=>({value:d.v,label:`${d.v} — ${d.l}`}))} placeholder="Tipo de despesa..."
+                  invalid={errors.expenseCode&&!ex.expenseCode}/>
+                <SearchSelect value={ex.costCenterCode} onChange={v=>updateExpense(i,'costCenterCode',v)}
+                  options={centrosCusto.map(cc=>({value:String(cc.codigo),label:`${cc.codigo} — ${cc.nome}`}))} placeholder="Centro de custo..."
+                  invalid={errors.costCenter&&!ex.costCenterCode}/>
                 <input type="number" min="0" step="0.01" value={ex.valor} onChange={e=>updateExpense(i,'valor',e.target.value)}
                   placeholder="Valor R$" className={F} style={FS(errors.expenseValor&&!(parseFloat(ex.valor)>0))}
                   onFocus={onF} onBlur={onB(errors.expenseValor&&!(parseFloat(ex.valor)>0))}/>
@@ -1817,11 +1856,10 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                   )}
                   <div>
                     <Lbl2 c="TIPO DOCUMENTO"/>
-                    <select value={cvDoc} onChange={e=>setCvDoc(e.target.value)}
-                      className={F2} style={{...FS2(false),appearance:'none',maxWidth:'200px'}}
-                      onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor='#E0D9D0'}>
-                      {allowedDocs.map(d=><option key={d.v} value={d.v}>{d.v} — {d.l}</option>)}
-                    </select>
+                    <div style={{maxWidth:'280px'}}>
+                      <SearchSelect value={cvDoc} onChange={v=>setCvDoc(v)}
+                        options={allowedDocs.map(d=>({value:d.v,label:`${d.v} — ${d.l}`}))} placeholder="Selecionar documento..."/>
+                    </div>
                   </div>
                   <div>
                     <div className="flex items-center justify-between mb-2">
@@ -1835,18 +1873,12 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                           {cvExpenses.length>1&&<button type="button" onClick={()=>removeCvExp(i)}
                             className="text-xs px-2 py-0.5 rounded-lg" style={{background:'#FEF2F2',color:'#DC2626'}}>✕ Remover</button>}
                         </div>
-                        <select value={ex.expenseCode} onChange={e=>updateCvExp(i,'expenseCode',e.target.value)}
-                          className={F2} style={{...FS2(cvErr.exp&&!ex.expenseCode),appearance:'none'}}
-                          onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor=cvErr.exp&&!ex.expenseCode?'#EF4444':'#E0D9D0'}>
-                          <option value="">Tipo de despesa...</option>
-                          {allowedExpenses.map(d=><option key={d.v} value={d.v}>{d.v} — {d.l}</option>)}
-                        </select>
-                        <select value={ex.costCenterCode} onChange={e=>updateCvExp(i,'costCenterCode',e.target.value)}
-                          className={F2} style={{...FS2(cvErr.exp&&!ex.costCenterCode),appearance:'none'}}
-                          onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor=cvErr.exp&&!ex.costCenterCode?'#EF4444':'#E0D9D0'}>
-                          <option value="">Centro de custo...</option>
-                          {centrosCustoCV.map(cc=><option key={cc.codigo} value={String(cc.codigo)}>{cc.codigo} — {cc.nome}</option>)}
-                        </select>
+                        <SearchSelect value={ex.expenseCode} onChange={v=>updateCvExp(i,'expenseCode',v)}
+                          options={allowedExpenses.map(d=>({value:d.v,label:`${d.v} — ${d.l}`}))} placeholder="Tipo de despesa..."
+                          invalid={cvErr.exp&&!ex.expenseCode}/>
+                        <SearchSelect value={ex.costCenterCode} onChange={v=>updateCvExp(i,'costCenterCode',v)}
+                          options={centrosCustoCV.map(cc=>({value:String(cc.codigo),label:`${cc.codigo} — ${cc.nome}`}))} placeholder="Centro de custo..."
+                          invalid={cvErr.exp&&!ex.costCenterCode}/>
                         <input type="number" min="0" step="0.01" value={ex.valor} onChange={e=>updateCvExp(i,'valor',e.target.value)}
                           placeholder="Valor R$" className={F2} style={FS2(cvErr.expValor&&!(parseFloat(ex.valor)>0))}
                           onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor=cvErr.expValor&&!(parseFloat(ex.valor)>0)?'#EF4444':'#E0D9D0'}/>
