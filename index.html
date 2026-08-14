@@ -804,6 +804,17 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
   const removeExpense = i  => setExpenses(p=>p.filter((_,j)=>j!==i));
   const updateExpense = (i,field,val) => setExpenses(p=>p.map((e,j)=>j===i?{...e,[field]:val}:e));
   const [parcelas,setParcelas]     = useState(editReq?.totvs?.parcelas||1);
+  const [parcelasList,setParcelasList] = useState(
+    editReq?.totvs?.parcelasList?.length
+      ? editReq.totvs.parcelasList.map(p=>({dueDate:p.dueDate||'',valor:String(p.valor||'')}))
+      : []
+  );
+  const setParcelasCount = (nRaw) => {
+    const n = parseInt(nRaw)||1;
+    setParcelas(n);
+    setParcelasList(prev=>{ const arr=prev.slice(0,n); while(arr.length<n) arr.push({dueDate:'',valor:''}); return arr; });
+  };
+  const updateParcela = (i,field,val) => setParcelasList(p=>p.map((x,j)=>j===i?{...x,[field]:val}:x));
   const [receipts,setReceipts]     = useState(editReq?.receipts||[]);
   const [errors,setErrors]         = useState({});
   const [loading,setLoading]       = useState(false);
@@ -849,8 +860,20 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
     if(!desc.trim())  e.desc  = 'Obrigatório';
     if(!category) e.category = 'Selecione';
     if(isPagamento) {
-      if(!dueDate)     e.dueDate    = 'Obrigatório';
-      else if(dueDate <= localDateStr()) e.dueDate = 'A data de vencimento deve ser posterior a hoje';
+      const nPar = parseInt(parcelas)||1;
+      if(nPar===1){
+        if(!dueDate)     e.dueDate = 'Obrigatório';
+        else if(dueDate <= localDateStr()) e.dueDate = 'A data de vencimento deve ser posterior a hoje';
+      } else {
+        if(parcelasList.some(p=>!p.dueDate)) e.parcelas='Informe a data de cada parcela';
+        else if(parcelasList.some(p=>p.dueDate <= localDateStr())) e.parcelas='Cada vencimento deve ser posterior a hoje';
+        else if(parcelasList.some(p=>!(parseFloat(p.valor)>0))) e.parcelas='Informe o valor de cada parcela';
+        else {
+          const psum = parcelasList.reduce((s,p)=>s+(parseFloat(p.valor)||0),0);
+          const tot = parseFloat(amount.replace(',','.'));
+          if(!isNaN(tot)&&Math.abs(psum-tot)>0.01) e.parcelas=`A soma das parcelas (${R(psum)}) deve ser igual ao valor total (${R(tot)})`;
+        }
+      }
       const expSum = expenses.reduce((s,ex)=>s+(parseFloat(ex.valor)||0),0);
       const totalVal = parseFloat(amount.replace(',','.'));
       if(expenses.some(ex=>!ex.expenseCode)) e.expenseCode='Selecione o tipo de cada despesa';
@@ -870,16 +893,21 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
     const val = parseFloat(amount.replace(',','.'));
 
     if(isPagamento) {
+      const nPar = parseInt(parcelas)||1;
+      const plist = nPar>1
+        ? parcelasList.map(p=>({dueDate:p.dueDate, valor:Math.round((parseFloat(p.valor)||0)*100)/100}))
+        : [{dueDate, valor: val}];
       const totvsData = {
         supplierCpfCnpj:    editReq?.totvs?.supplierCpfCnpj||'28171353000173',
         duplicateCode:      isEdit?(editReq.totvs?.duplicateCode||genDuplicateCode()):genDuplicateCode(),
         bearerCode:         editReq?.totvs?.bearerCode||1020,
-        issueDate:          today, dueDate, arrivalDate:today,
+        issueDate:          today, dueDate: plist[0].dueDate, arrivalDate:today,
         document:           parseInt(document),
         prevision:2, stage:1,
         expenses:           expenses.map(ex=>({expenseCode:parseInt(ex.expenseCode),valor:parseFloat(ex.valor)||0,costCenterCode:parseInt(ex.costCenterCode)||1})),
         observation:        desc.trim(),
-        parcelas:           parseInt(parcelas)||1,
+        parcelas:           plist.length,
+        parcelasList:       plist,
       };
       if(isEdit) {
         setTimeout(()=>onSubmit({
@@ -1008,44 +1036,39 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
 
         {/* Campos TOTVS (somente Pagamento) */}
         {isPagamento&&(<>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Lbl err>DATA 1º VENCIMENTO</Lbl>
-              <input type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)}
-                min={minDueDate()}
-                className={F} style={FS(errors.dueDate)} onFocus={onF} onBlur={onB(errors.dueDate)}/>
-              <Err msg={errors.dueDate}/>
-            </div>
-            <div>
-              <Lbl>PARCELAS</Lbl>
-              <select value={parcelas} onChange={e=>setParcelas(e.target.value)}
-                className={F} style={{...FS(false),appearance:'none'}} onFocus={onF} onBlur={onB(false)}>
-                {[1,2,3,4,5,6,7,8,9,10,11,12].map(n=><option key={n} value={n}>{n}x</option>)}
-              </select>
-            </div>
+          <div>
+            <Lbl>PARCELAS</Lbl>
+            <select value={parcelas} onChange={e=>setParcelasCount(e.target.value)}
+              className={F} style={{...FS(false),appearance:'none',maxWidth:'160px'}} onFocus={onF} onBlur={onB(false)}>
+              {[1,2,3,4,5,6,7,8,9,10,11,12].map(n=><option key={n} value={n}>{n}x</option>)}
+            </select>
           </div>
 
-          {parcelas>1 && amount && !isNaN(parseFloat(amount.replace(',','.'))) && dueDate && (()=>{
-            const total=parseFloat(amount.replace(',','.')); const n=parseInt(parcelas);
-            const firstDue=new Date(dueDate+'T12:00:00');
-            return (
-              <div className="rounded-xl p-3 space-y-1.5" style={{background:'#F7F3EE',border:'1px solid #EDE8E3'}}>
-                <p className="text-xs font-bold mb-2" style={{color:'#AAA',letterSpacing:'0.06em'}}>PRÉVIA DAS PARCELAS</p>
-                {Array.from({length:n},(_,i)=>{
-                  const d=new Date(firstDue); d.setDate(d.getDate()+(i*30));
-                  return (
-                    <div key={i} className="flex items-center justify-between text-xs">
-                      <span style={{color:'#888'}}>Parcela {i+1}</span>
-                      <div className="flex items-center gap-3">
-                        <span style={{color:'#666'}}>{d.toLocaleDateString('pt-BR')}</span>
-                        <span className="font-bold" style={{color:'#C9BBAA'}}>{R(total/n)}</span>
-                      </div>
-                    </div>
-                  );
-                })}
+          {parcelas>1 ? (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Lbl err>DATA E VALOR DE CADA PARCELA</Lbl>
+                {(()=>{const s=parcelasList.reduce((t,p)=>t+(parseFloat(p.valor)||0),0);const tot=parseFloat(amount.replace(',','.'))||0;const ok=tot>0&&Math.abs(s-tot)<0.01;return tot>0&&<span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{background:ok?'#ECFDF5':'#FEF2F2',color:ok?'#047857':'#DC2626'}}>{ok?'✓ ':''}{R(s)} / {R(tot)}</span>;})()}
               </div>
-            );
-          })()}
+              {parcelasList.map((p,i)=>(
+                <div key={i} className="flex gap-2 mb-2 items-center">
+                  <span className="text-xs font-bold flex-shrink-0" style={{width:'58px',color:'#AAA'}}>Parcela {i+1}</span>
+                  <input type="date" value={p.dueDate} onChange={e=>updateParcela(i,'dueDate',e.target.value)} min={minDueDate()}
+                    className={F+' flex-1'} style={{...FS(errors.parcelas&&!p.dueDate),minWidth:0}} onFocus={onF} onBlur={onB(errors.parcelas&&!p.dueDate)}/>
+                  <input type="number" min="0" step="0.01" value={p.valor} onChange={e=>updateParcela(i,'valor',e.target.value)}
+                    placeholder="R$" className={F} style={{...FS(errors.parcelas&&!(parseFloat(p.valor)>0)),width:'104px',flexShrink:0}} onFocus={onF} onBlur={onB(errors.parcelas&&!(parseFloat(p.valor)>0))}/>
+                </div>
+              ))}
+              <Err msg={errors.parcelas}/>
+            </div>
+          ) : (
+            <div>
+              <Lbl err>DATA DO VENCIMENTO</Lbl>
+              <input type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)} min={minDueDate()}
+                className={F} style={{...FS(errors.dueDate),maxWidth:'220px'}} onFocus={onF} onBlur={onB(errors.dueDate)}/>
+              <Err msg={errors.dueDate}/>
+            </div>
+          )}
 
           <div>
             <Lbl>TIPO DE DOCUMENTO</Lbl>
@@ -1192,35 +1215,38 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
 /* ═══════════════════════ TOTVS PAYLOAD BUILDER ═══════════════════════ */
 function buildTotvsPayload(req) {
   const t = req.totvs || {};
-  const n = parseInt(t.parcelas)||1;
-  const valParcela = Math.round((req.amount / n) * 100) / 100;
   // Formata em componentes LOCAIS (não UTC) para evitar deslocamento de fuso (ex.: 00:00 virar 03:00Z)
-  const fmtISO = d => { const p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T00:00:00`; };
+  const pad = v => String(v).padStart(2,'0');
+  const fmtISO = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T00:00:00`;
   const issueDate   = fmtISO(new Date((t.issueDate  ||localDateStr())+'T00:00:00'));
   const arrivalDate = fmtISO(new Date((t.arrivalDate||localDateStr())+'T00:00:00'));
-  const firstDue    = new Date((t.dueDate    ||localDateStr())+'T00:00:00');
+  // Lista de parcelas com data e valor próprios. Compatível com registros antigos (sem parcelasList).
+  let list;
+  if (t.parcelasList && t.parcelasList.length) {
+    list = t.parcelasList.map(p=>({ dueDate:p.dueDate, valor:Math.round((parseFloat(p.valor)||0)*100)/100 }));
+  } else {
+    const n = parseInt(t.parcelas)||1;
+    const val = Math.round((req.amount / n) * 100) / 100;
+    const first = new Date((t.dueDate||localDateStr())+'T00:00:00');
+    list = Array.from({length:n},(_,i)=>{ const d=new Date(first); d.setDate(d.getDate()+(i*30)); return { dueDate:`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`, valor:val }; });
+  }
+  const expBase = (t.expenses?.length ? t.expenses : [{expenseCode:t.expenseCode,valor:req.amount,costCenterCode:t.costCenterCode||1}]);
   return {
     branchCnpj:      TOTVS_BRANCH_CNPJ,
     duplicateCode:   t.duplicateCode,
     supplierCpfCnpj: String(t.supplierCpfCnpj||'').replace(/\D/g,''),
-    installments: Array.from({length:n},(_,i)=>{
-      const due=new Date(firstDue); due.setDate(due.getDate()+(i*30));
-      return {
-        installmentCode: i+1, bearerCode:t.bearerCode,
-        issueDate, dueDate:fmtISO(due), arrivalDate,
-        document:t.document, duplicateValue:valParcela,
-        prevision:t.prevision, stage:t.stage,
-        expenses:(t.expenses?.length
-          ? t.expenses
-          : [{expenseCode:t.expenseCode,valor:req.amount,costCenterCode:t.costCenterCode||1}]
-        ).map(e=>({
-          expenseCode:e.expenseCode,
-          costCenterCode:e.costCenterCode||1,
-          proratedPercentage:Math.round((e.valor/(req.amount||1))*10000)/100,
-        })),
-        ...(t.observation?{observations:[{observation:t.observation}]}:{}),
-      };
-    }),
+    installments: list.map((parc,i)=>({
+      installmentCode: i+1, bearerCode:t.bearerCode,
+      issueDate, dueDate:fmtISO(new Date((parc.dueDate||localDateStr())+'T00:00:00')), arrivalDate,
+      document:t.document, duplicateValue:parc.valor,
+      prevision:t.prevision, stage:t.stage,
+      expenses: expBase.map(e=>({
+        expenseCode:e.expenseCode,
+        costCenterCode:e.costCenterCode||1,
+        proratedPercentage:Math.round((e.valor/(req.amount||1))*10000)/100,
+      })),
+      ...(t.observation?{observations:[{observation:t.observation}]}:{}),
+    })),
   };
 }
 
@@ -1249,6 +1275,13 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
     sbSelect('centros_custo','?order=codigo.asc&ativo=eq.true').then(cc=>{if(cc&&cc.length)setCentrosCustoCV(cc);}).catch(()=>{});
   },[]);
   const [cvParcelas,setCvParc]   = useState(1);
+  const [cvParcList,setCvParcList] = useState([]);
+  const setCvParcCount = (nRaw) => {
+    const n = parseInt(nRaw)||1;
+    setCvParc(n);
+    setCvParcList(prev=>{ const arr=prev.slice(0,n); while(arr.length<n) arr.push({dueDate:'',valor:''}); return arr; });
+  };
+  const updateCvParc = (i,field,val) => setCvParcList(p=>p.map((x,j)=>j===i?{...x,[field]:val}:x));
   const [cvErr,setCvErr]         = useState({});
 
   const threshold = getThreshold();
@@ -1311,10 +1344,18 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
   const convertService = () => {
     const e={};
     if(!cvAmount||isNaN(parseFloat(cvAmount.replace(',','.')))) e.amount='Valor inválido';
-    if(!cvDue) e.due='Obrigatório';
-    else if(cvDue <= localDateStr()) e.due='O vencimento deve ser posterior a hoje';
-    const cvExpSum = cvExpenses.reduce((s,ex)=>s+(parseFloat(ex.valor)||0),0);
     const cvTotalVal = parseFloat(cvAmount.replace(',','.'));
+    const nCvPar = parseInt(cvParcelas)||1;
+    if(nCvPar===1){
+      if(!cvDue) e.due='Obrigatório';
+      else if(cvDue <= localDateStr()) e.due='O vencimento deve ser posterior a hoje';
+    } else {
+      if(cvParcList.some(p=>!p.dueDate)) e.parc='Informe a data de cada parcela';
+      else if(cvParcList.some(p=>p.dueDate <= localDateStr())) e.parc='Cada vencimento deve ser posterior a hoje';
+      else if(cvParcList.some(p=>!(parseFloat(p.valor)>0))) e.parc='Informe o valor de cada parcela';
+      else { const ps=cvParcList.reduce((s,p)=>s+(parseFloat(p.valor)||0),0); if(!isNaN(cvTotalVal)&&Math.abs(ps-cvTotalVal)>0.01) e.parc=`Soma das parcelas (${R(ps)}) ≠ valor total (${R(cvTotalVal)})`; }
+    }
+    const cvExpSum = cvExpenses.reduce((s,ex)=>s+(parseFloat(ex.valor)||0),0);
     // Trava de valor: não pode ultrapassar o valor aprovado pelo diretor (só reduzir)
     const teto = parseFloat(req.valor_aprovado);
     if(!isNaN(teto) && !isNaN(cvTotalVal) && cvTotalVal > teto + 0.001)
@@ -1326,6 +1367,9 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
     if(!cvPix.trim()) e.pix='Obrigatório';
     if(Object.keys(e).length){setCvErr(e);return;}
     const today=localDateStr();
+    const cvPlist = nCvPar>1
+      ? cvParcList.map(p=>({dueDate:p.dueDate, valor:Math.round((parseFloat(p.valor)||0)*100)/100}))
+      : [{dueDate:cvDue, valor: cvTotalVal}];
     const totvsData={
       supplierCpfCnpj:'28171353000173',
       duplicateCode:(()=>{
@@ -1333,11 +1377,12 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
         return parseInt(ymd+String(Date.now()%100));
       })(),
       bearerCode:1020,
-      issueDate:today, dueDate:cvDue, arrivalDate:today,
+      issueDate:today, dueDate:cvPlist[0].dueDate, arrivalDate:today,
       document:parseInt(cvDoc), prevision:2, stage:1,
       expenses:cvExpenses.map(ex=>({expenseCode:parseInt(ex.expenseCode),valor:parseFloat(ex.valor)||0,costCenterCode:parseInt(ex.costCenterCode)||1})),
       observation:req.description,
-      parcelas:parseInt(cvParcelas)||1,
+      parcelas:cvPlist.length,
+      parcelasList:cvPlist,
     };
     dispatch({type:'CONVERT',id:req.id,
       amount:parseFloat(cvAmount.replace(',','.')),
@@ -1479,7 +1524,7 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                 {[
                   ['Cód. Duplicata',  req.totvs.duplicateCode],
                   ['Fornecedor CNPJ', req.totvs.supplierCpfCnpj||'—'],
-                  ['Parcelas',        `${req.totvs.parcelas||1}x de ${R((req.amount||0)/(req.totvs.parcelas||1))}`],
+                  ['Parcelas',        `${req.totvs.parcelas||1}x`],
                   ['1º Vencimento',   req.totvs.dueDate],
                   ['Emissão',         req.totvs.issueDate||'—'],
                   ['Chegada',         req.totvs.arrivalDate||'—'],
@@ -1499,6 +1544,18 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                   </div>
                 )}
               </div>
+              {/* Parcelas (data e valor de cada uma) */}
+              {req.totvs.parcelasList?.length>1&&(
+                <div style={{borderTop:'1px solid #F0EBE5',paddingTop:'12px',marginTop:'8px'}}>
+                  <p className="text-xs font-bold mb-2" style={{color:'#AAA',letterSpacing:'0.07em'}}>PARCELAS</p>
+                  {req.totvs.parcelasList.map((p,i)=>(
+                    <div key={i} className="flex items-center justify-between py-1.5 text-sm" style={{borderBottom:'1px solid #F7F3EE'}}>
+                      <span style={{color:'#555'}}>Parcela {i+1} · {(()=>{try{return new Date(p.dueDate+'T12:00:00').toLocaleDateString('pt-BR');}catch{return p.dueDate;}})()}</span>
+                      <span className="font-semibold" style={{color:'#C9BBAA'}}>{R(p.valor||0)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {/* Despesas */}
               {(req.totvs.expenses?.length>0||(req.totvs.expenseCode))&&(
                 <div style={{borderTop:'1px solid #F0EBE5',paddingTop:'12px',marginTop:'8px'}}>
@@ -1689,24 +1746,42 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                       <Err2 msg={cvErr.pix}/>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Lbl2 c="PARCELAS"/>
+                    <select value={cvParcelas} onChange={e=>setCvParcCount(e.target.value)}
+                      className={F2} style={{...FS2(false),appearance:'none',maxWidth:'150px'}}
+                      onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor='#E0D9D0'}>
+                      {[1,2,3,4,5,6,7,8,9,10,11,12].map(n=><option key={n} value={n}>{n}x</option>)}
+                    </select>
+                  </div>
+                  {cvParcelas>1 ? (
                     <div>
-                      <Lbl2 c="DATA 1º VENCIMENTO" err/>
-                      <input type="date" value={cvDue} onChange={e=>setCvDue(e.target.value)}
-                        min={minDueDate()}
-                        className={F2} style={FS2(cvErr.due)}
+                      <div className="flex items-center justify-between mb-2">
+                        <Lbl2 c="DATA E VALOR DE CADA PARCELA" err/>
+                        {(()=>{const s=cvParcList.reduce((t,p)=>t+(parseFloat(p.valor)||0),0);const tot=parseFloat(cvAmount.replace(',','.'))||0;const ok=tot>0&&Math.abs(s-tot)<0.01;return tot>0&&<span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{background:ok?'#ECFDF5':'#FEF2F2',color:ok?'#047857':'#DC2626'}}>{ok?'✓ ':''}{R(s)} / {R(tot)}</span>;})()}
+                      </div>
+                      {cvParcList.map((p,i)=>(
+                        <div key={i} className="flex gap-2 mb-2 items-center">
+                          <span className="text-xs font-bold flex-shrink-0" style={{width:'56px',color:'#AAA'}}>Parc. {i+1}</span>
+                          <input type="date" value={p.dueDate} onChange={e=>updateCvParc(i,'dueDate',e.target.value)} min={minDueDate()}
+                            className={F2+' flex-1'} style={{...FS2(cvErr.parc&&!p.dueDate),minWidth:0}}
+                            onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor=cvErr.parc&&!p.dueDate?'#EF4444':'#E0D9D0'}/>
+                          <input type="number" min="0" step="0.01" value={p.valor} onChange={e=>updateCvParc(i,'valor',e.target.value)}
+                            placeholder="R$" className={F2} style={{...FS2(cvErr.parc&&!(parseFloat(p.valor)>0)),width:'96px',flexShrink:0}}
+                            onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor=cvErr.parc&&!(parseFloat(p.valor)>0)?'#EF4444':'#E0D9D0'}/>
+                        </div>
+                      ))}
+                      <Err2 msg={cvErr.parc}/>
+                    </div>
+                  ) : (
+                    <div>
+                      <Lbl2 c="DATA DO VENCIMENTO" err/>
+                      <input type="date" value={cvDue} onChange={e=>setCvDue(e.target.value)} min={minDueDate()}
+                        className={F2} style={{...FS2(cvErr.due),maxWidth:'200px'}}
                         onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor=cvErr.due?'#EF4444':'#E0D9D0'}/>
                       <Err2 msg={cvErr.due}/>
                     </div>
-                    <div>
-                      <Lbl2 c="PARCELAS"/>
-                      <select value={cvParcelas} onChange={e=>setCvParc(e.target.value)}
-                        className={F2} style={{...FS2(false),appearance:'none'}}
-                        onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor='#E0D9D0'}>
-                        {[1,2,3,4,5,6,7,8,9,10,11,12].map(n=><option key={n} value={n}>{n}x</option>)}
-                      </select>
-                    </div>
-                  </div>
+                  )}
                   <div>
                     <Lbl2 c="TIPO DOCUMENTO"/>
                     <select value={cvDoc} onChange={e=>setCvDoc(e.target.value)}
