@@ -388,7 +388,7 @@ function reducer(state, action) {
     case 'ADD':       return [action.req,...state];
     case 'MARK_SENT': return state.map(r => r.id!==action.id ? r : {...r, sent_to_totvs:true});
     case 'UPDATE': return state.map(r => r.id!==action.id ? r : {
-      ...r, status:action.status,
+      ...r, status:action.status, ...(action.fields||{}),
       history:[...r.history,{date:fmtDate(),actor:action.actor,action:action.label,comment:action.comment||''}]
     });
     case 'EDIT_FIELDS': return state.map(r => r.id!==action.id ? r : {...r, ...action.fields});
@@ -401,7 +401,7 @@ function reducer(state, action) {
       ...(action.receipts!==undefined?{receipts:action.receipts}:{}),
       ...(action.chave_pix!==undefined?{chave_pix:action.chave_pix}:{}),
       ...(action.favorecido!==undefined?{favorecido:action.favorecido}:{}),
-      history:[...r.history,{date:fmtDate(),actor:action.actor,action:'Serviço concluído — convertido para pagamento e enviado ao gestor',comment:action.comment||''}]
+      history:[...r.history,{date:fmtDate(),actor:action.actor,action:action.action||'Serviço concluído — convertido para pagamento e enviado ao gestor',comment:action.comment||''}]
     });
     default: return state;
   }
@@ -833,6 +833,7 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
   const [category,setCategory]     = useState(editReq?.category||'');
   const [chavePix,setChavePix]     = useState(editReq?.chave_pix||'');
   const [favorecido,setFavorecido] = useState(editReq?.favorecido||'');
+  const [increaseReason,setIncreaseReason] = useState('');
   const [dueDate,setDueDate]       = useState(editReq?.totvs?.dueDate||'');
   const [document,setDocument]     = useState(editReq?.totvs?.document||allowedDocs[0]?.v||15);
   const [expenses,setExpenses]     = useState(
@@ -873,6 +874,9 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
 
   // Um serviço já convertido em pagamento deve editar os campos de pagamento (TOTVS)
   const isPagamento = tipo === 'pagamento' || !!editReq?.servico_convertido;
+  // Edição de pagamento já convertido com valor acima do aprovado → precisa reaprovação do diretor
+  const tetoEdit = parseFloat(editReq?.valor_aprovado);
+  const isIncreaseEdit = !!editReq?.servico_convertido && !isNaN(tetoEdit) && parseFloat((amount||'').replace(',','.')) > tetoEdit + 0.001;
 
   const genDuplicateCode = () => {
     const today = new Date();
@@ -899,6 +903,8 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
     if(!amount||isNaN(parseFloat(amount.replace(',','.')))) e.amount = 'Valor inválido';
     if(!desc.trim())  e.desc  = 'Obrigatório';
     if(!category) e.category = 'Selecione';
+    // Valor acima do aprovado num pagamento já convertido → precisa de motivo (vai ao diretor reavaliar)
+    if(isIncreaseEdit && !increaseReason.trim()) e.increaseReason = 'Informe o motivo do aumento';
     if(isPagamento) {
       const nPar = parseInt(parcelas)||1;
       if(nPar===1){
@@ -952,14 +958,19 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
       };
       // Gestor que cria pagamento não tem gestor acima → vai direto ao diretor (sempre, independe do valor)
       const gestorCriador = user.role==='gestor';
-      const payStatus = gestorCriador ? 'pending_diretor' : 'pending_gestor';
+      // Aumento acima do aprovado → sempre ao diretor reavaliar (mantém o teto antigo até ele aprovar)
+      const payStatus = isIncreaseEdit ? 'pending_diretor' : (gestorCriador ? 'pending_diretor' : 'pending_gestor');
       const payMsg = gestorCriador ? 'ao diretor' : 'para revisão do gestor';
+      const payAction = isIncreaseEdit
+        ? `Solicitou aumento de ${R(tetoEdit)} para ${R(val)} — reenviado ao diretor para reavaliar`
+        : `Solicitação editada e reenviada ${payMsg}`;
+      const payComment = isIncreaseEdit ? increaseReason.trim() : '';
       if(isEdit) {
         setTimeout(()=>onSubmit({
           ...editReq, title:title.trim(), description:desc.trim(),
           amount:val, category, receipts, totvs:totvsData, chave_pix:chavePix, favorecido:favorecido.trim(),
           status:payStatus,
-          history:[...(editReq.history||[]),{date:fmtDate(),actor:user.name,action:`Solicitação editada e reenviada ${payMsg}`,comment:''}]
+          history:[...(editReq.history||[]),{date:fmtDate(),actor:user.name,action:payAction,comment:payComment}]
         }),400);
       } else {
         setTimeout(()=>onSubmit({
@@ -973,16 +984,18 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
       }
     } else {
       if(isEdit) {
-        // Edição de serviço devolvido — destino depende se já foi convertido
+        // Edição de serviço — destino depende se já foi convertido
         const targetStatus = editReq.servico_convertido ? 'pending_gestor' : 'pending_diretor';
         const actionLabel  = editReq.servico_convertido
           ? 'Serviço editado e reenviado ao gestor'
-          : 'Serviço editado e reenviado ao diretor';
+          : 'Serviço editado e reenviado ao diretor para reavaliar o valor';
         setTimeout(()=>onSubmit({
           ...editReq,
           title:title.trim(), description:desc.trim(),
           amount:val, receipts,
           status:targetStatus,
+          // Serviço reenviado ao diretor: zera o valor aprovado (será reaprovado com o novo valor)
+          valor_aprovado: editReq.servico_convertido ? editReq.valor_aprovado : null,
           history:[...(editReq.history||[]),{date:fmtDate(),actor:user.name,action:actionLabel,comment:''}]
         }),400);
       } else {
@@ -1078,6 +1091,21 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
             <Err msg={errors.category}/>
           </div>
         </div>
+
+        {/* Aviso de aumento acima do aprovado (pagamento convertido) */}
+        {isIncreaseEdit&&(
+          <div className="rounded-xl p-3" style={{background:'#FEF7ED',border:'1px solid #FED7AA'}}>
+            <div className="flex items-start gap-2 text-xs mb-2" style={{color:'#92400E'}}>
+              <svg width="15" height="15" className="flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path strokeLinecap="round" d="M12 9v4m0 4h.01"/></svg>
+              <span>Valor acima do aprovado pelo diretor (<b>{R(tetoEdit)}</b>). Ao reenviar, vai ao <b>diretor</b> para aprovar o novo valor antes de seguir.</span>
+            </div>
+            <Lbl err>MOTIVO DO AUMENTO</Lbl>
+            <textarea value={increaseReason} onChange={e=>setIncreaseReason(e.target.value)} rows={2}
+              placeholder="Explique por que o valor ficou acima do aprovado."
+              className={F+' resize-none'} style={FS(errors.increaseReason)} onFocus={onF} onBlur={onB(errors.increaseReason)}/>
+            <Err msg={errors.increaseReason}/>
+          </div>
+        )}
 
         {/* Campos TOTVS (somente Pagamento) */}
         {isPagamento&&(<>
@@ -1254,7 +1282,7 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
           onMouseEnter={e=>!loading&&(e.currentTarget.style.background='var(--hazelnut-deep)')} onMouseLeave={e=>e.currentTarget.style.background='var(--hazelnut)'}>
           {loading?<><Spinner/>Enviando...</>:<>
             <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M13 6l6 6-6 6"/></svg>
-            {isEdit?'Reenviar para o Gestor':isPagamento?'Enviar para o Gestor':'Enviar para o Diretor'}</>}
+            {isIncreaseEdit?'Enviar ao diretor para aprovar novo valor':(isEdit?(editReq?.servico_convertido?'Reenviar para o Gestor':'Reenviar'):isPagamento?'Enviar para o Gestor':'Enviar para o Diretor')}</>}
         </button>
       </div>
     </div>
@@ -1314,6 +1342,7 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
   const [cvAmount,setCvAmount]   = useState(String(req.amount||''));
   const [cvPix,setCvPix]         = useState(req.chave_pix||'');
   const [cvFavorecido,setCvFavorecido] = useState(req.favorecido||'');
+  const [cvIncreaseReason,setCvIncreaseReason] = useState('');
   const [cvObs,setCvObs]         = useState(req.description||'');
   const [cvReceipts,setCvReceipts] = useState(req.receipts||[]);
   const cvFileRef = useRef();
@@ -1361,10 +1390,15 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
   };
   const gestorApproveLabel = () => gestorApproveTarget()==='pending_diretor' ? 'Aprovar → Diretor' : 'Aprovar → Financeiro';
 
+  // Pedido de aumento aguardando o diretor: valor atual acima do teto aprovado
+  const tetoAprovado = parseFloat(req.valor_aprovado);
+  const pendingIncrease = !isNaN(tetoAprovado) && req.amount > tetoAprovado + 0.001;
+
   // Texto do botão do Diretor — serviço NÃO convertido é só aprovação de serviço;
   // pagamento e serviço já convertido seguem ao financeiro
   const diretorApproveTarget = () => (req.tipo==='servico' && !req.servico_convertido) ? 'servico_aprovado' : 'pending_financeiro';
-  const diretorApproveLabel  = () => (req.tipo==='servico' && !req.servico_convertido) ? 'Aprovar Serviço' : 'Aprovar → Financeiro';
+  const diretorApproveLabel  = () => pendingIncrease ? 'Aprovar novo valor'
+    : ((req.tipo==='servico' && !req.servico_convertido) ? 'Aprovar Serviço' : 'Aprovar → Financeiro');
 
   const approve = () => {
     if(isGestor) {
@@ -1375,12 +1409,20 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
       dispatch({type:'UPDATE',id:req.id,status:tgt,actor:user.name,label:lbl,comment});
       showToast(tgt==='pending_diretor'?'Aprovado e enviado ao diretor!':'Aprovado e enviado ao financeiro!','ok');
     } else if(isDiretor) {
-      const tgt = diretorApproveTarget();
-      const lbl = tgt==='servico_aprovado'
-        ? 'Serviço aprovado pelo diretor — aguardando execução e conversão'
-        : 'Aprovado pelo diretor — enviado ao financeiro para revisão';
-      dispatch({type:'UPDATE',id:req.id,status:tgt,actor:user.name,label:lbl,comment});
-      showToast(tgt==='servico_aprovado'?'Serviço aprovado!':'Aprovado e enviado ao financeiro!','ok');
+      if(pendingIncrease){
+        // Aprova o aumento: vira o novo teto e segue ao financeiro
+        dispatch({type:'UPDATE',id:req.id,status:'pending_financeiro',actor:user.name,
+          label:`Aumento de valor aprovado pelo diretor (${R(tetoAprovado)} → ${R(req.amount)}) — enviado ao financeiro`,
+          comment, fields:{valor_aprovado:req.amount}});
+        showToast('Aumento aprovado e enviado ao financeiro!','ok');
+      } else {
+        const tgt = diretorApproveTarget();
+        const lbl = tgt==='servico_aprovado'
+          ? 'Serviço aprovado pelo diretor — aguardando execução e conversão'
+          : 'Aprovado pelo diretor — enviado ao financeiro para revisão';
+        dispatch({type:'UPDATE',id:req.id,status:tgt,actor:user.name,label:lbl,comment});
+        showToast(tgt==='servico_aprovado'?'Serviço aprovado!':'Aprovado e enviado ao financeiro!','ok');
+      }
     }
     onBack();
   };
@@ -1414,10 +1456,10 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
       else { const ps=cvParcList.reduce((s,p)=>s+(parseFloat(p.valor)||0),0); if(!isNaN(cvTotalVal)&&Math.abs(ps-cvTotalVal)>0.01) e.parc=`Soma das parcelas (${R(ps)}) ≠ valor total (${R(cvTotalVal)})`; }
     }
     const cvExpSum = cvExpenses.reduce((s,ex)=>s+(parseFloat(ex.valor)||0),0);
-    // Trava de valor: não pode ultrapassar o valor aprovado pelo diretor (só reduzir)
+    // Valor acima do aprovado pelo diretor → vai ao diretor reavaliar (exige motivo)
     const teto = parseFloat(req.valor_aprovado);
-    if(!isNaN(teto) && !isNaN(cvTotalVal) && cvTotalVal > teto + 0.001)
-      e.amount=`Valor superior ao aprovado pelo aprovador.`;
+    const isIncrease = !isNaN(teto) && !isNaN(cvTotalVal) && cvTotalVal > teto + 0.001;
+    if(isIncrease && !cvIncreaseReason.trim()) e.increaseReason='Informe o motivo do aumento';
     if(cvExpenses.some(ex=>!ex.expenseCode)) e.exp='Selecione o tipo de cada despesa';
     if(cvExpenses.some(ex=>!ex.costCenterCode)) e.exp=e.exp||'Selecione o centro de custo de cada despesa';
     if(cvExpenses.some(ex=>!(parseFloat(ex.valor)>0))) e.expValor='Informe o valor de cada despesa';
@@ -1444,24 +1486,28 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
       parcelasList:cvPlist,
     };
     const cvReceiptsClean = (cvReceipts||[]).map(r=>({name:r.name,type:r.type,data:r.data}));
-    // Se quem converte é gestor (criador), não há gestor acima → vai direto ao diretor
-    const convStatus = user.role==='gestor' ? 'pending_diretor' : 'pending_gestor';
-    const convDest   = user.role==='gestor' ? 'diretor' : 'gestor';
+    // Aumento → sempre ao diretor reavaliar. Senão, fluxo normal (gestor; ou diretor se o criador é gestor).
+    const convStatus = isIncrease ? 'pending_diretor' : (user.role==='gestor' ? 'pending_diretor' : 'pending_gestor');
+    const convDest   = (isIncrease || user.role==='gestor') ? 'diretor' : 'gestor';
+    const convAction = isIncrease
+      ? `Solicitou aumento de ${R(teto)} para ${R(cvTotalVal)} — convertido e enviado ao diretor para reavaliar`
+      : `Serviço concluído — convertido para pagamento e enviado ao ${convDest}`;
+    const convComment = isIncrease ? cvIncreaseReason.trim() : (cvPix?`Chave PIX: ${cvPix}`:'');
     dispatch({type:'CONVERT',id:req.id,
       amount:parseFloat(cvAmount.replace(',','.')),
       totvs:totvsData, description:cvObs.trim(), receipts:cvReceiptsClean,
       chave_pix:cvPix, favorecido:cvFavorecido.trim(), status:convStatus,
-      actor:user.name, comment:cvPix?`Chave PIX: ${cvPix}`:''
+      actor:user.name, action:convAction, comment:convComment
     });
     // Salva no registro
     sbUpdate('requests',{
       chave_pix:cvPix, favorecido:cvFavorecido.trim(), amount:parseFloat(cvAmount.replace(',','.')),
       description:cvObs.trim(), receipts:cvReceiptsClean,
       totvs:totvsData, status:convStatus, servico_convertido:true,
-      history:[...(req.history||[]),{date:fmtDate(),actor:user.name,action:`Serviço concluído — convertido para pagamento e enviado ao ${convDest}`,comment:cvPix?`Chave PIX: ${cvPix}`:''}],
+      history:[...(req.history||[]),{date:fmtDate(),actor:user.name,action:convAction,comment:convComment}],
       updated_at:new Date().toISOString(),
     },`?id=eq.${req.id}`).catch(()=>{});
-    showToast(`Convertido para pagamento e enviado ao ${convDest}!`,'ok');
+    showToast(isIncrease?'Aumento enviado ao diretor para aprovar!':`Convertido para pagamento e enviado ao ${convDest}!`,'ok');
     setModal(null);
     onBack();
   };
@@ -1682,23 +1728,37 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
           )}
 
           {/* Actions — Diretor */}
+          {canActDiretor&&pendingIncrease&&(()=>{
+            const inc = [...(req.history||[])].reverse().find(h=>/Solicitou aumento/i.test(h.action||''));
+            return (
+              <div className="rounded-xl p-4" style={{background:'#FEF7ED',border:'1px solid #FDBA74'}}>
+                <p className="text-xs font-bold mb-2" style={{color:'#B45309',letterSpacing:'0.06em'}}>PEDIDO DE AUMENTO DE VALOR</p>
+                <div className="flex items-center gap-3 text-sm mb-2">
+                  <div><span style={{color:'#AAA'}}>Aprovado antes: </span><span className="font-semibold" style={{color:'#555'}}>{R(tetoAprovado)}</span></div>
+                  <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#B45309" strokeWidth="2"><path strokeLinecap="round" d="M5 12h14M13 6l6 6-6 6"/></svg>
+                  <div><span style={{color:'#AAA'}}>Solicitado: </span><span className="font-bold" style={{color:'#B45309'}}>{R(req.amount)}</span></div>
+                </div>
+                {inc?.comment && <div><p className="text-xs" style={{color:'#AAA'}}>Motivo do aumento</p><p className="text-sm mt-0.5" style={{color:'#555'}}>"{inc.comment}"</p></div>}
+              </div>
+            );
+          })()}
           {canActDiretor&&(
             <div className="flex gap-2">
               <button onClick={()=>{setComment('');setModal('reject');}} className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95" style={{border:'2px solid #FECACA',color:'#DC2626',background:'#FEF2F2'}} onMouseEnter={e=>e.currentTarget.style.background='#FEE2E2'} onMouseLeave={e=>e.currentTarget.style.background='#FEF2F2'}>
                 Devolver
               </button>
-              <button onClick={()=>{setComment('');setModal('approve');}} className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95" style={{background:'#282425',color:'#C9BBAA'}}>
+              <button onClick={()=>{setComment('');setModal('approve');}} className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all active:scale-95" style={{background:pendingIncrease?'#B45309':'#282425',color:'#C9BBAA'}}>
                 {diretorApproveLabel()}
               </button>
             </div>
           )}
 
-          {/* Actions — Serviço aprovado (solicitante converte) */}
+          {/* Actions — Serviço aprovado (solicitante converte ou pede reavaliação de valor) */}
           {canConvert&&(
             <div className="rounded-xl p-4 space-y-3" style={{background:'#ECFDF5',border:'1px solid #A7F3D0'}}>
               <div className="flex items-start gap-2 text-sm" style={{color:'#065F46'}}>
                 <svg width="16" height="16" className="flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                <span>Serviço aprovado pelo diretor. Após a execução, converta para pagamento preenchendo os dados financeiros.</span>
+                <span>Serviço aprovado no valor de <b>{R(req.amount)}</b>. Ao converter, informe o valor real: se ficou <b>maior</b>, o app pede o motivo e envia ao diretor para reavaliar; se <b>igual ou menor</b>, segue normal.</span>
               </div>
               <button onClick={()=>setModal('convert')}
                 className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
@@ -1811,6 +1871,25 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                       <Err2 msg={cvErr.pix}/>
                     </div>
                   </div>
+                  {(()=>{
+                    const tetoV = parseFloat(req.valor_aprovado);
+                    const cvv = parseFloat((cvAmount||'').replace(',','.'));
+                    if(isNaN(tetoV) || isNaN(cvv) || cvv <= tetoV + 0.001) return null;
+                    return (
+                      <div className="rounded-xl p-3" style={{background:'#FEF7ED',border:'1px solid #FED7AA'}}>
+                        <div className="flex items-start gap-2 text-xs mb-2" style={{color:'#92400E'}}>
+                          <svg width="15" height="15" className="flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><path strokeLinecap="round" d="M12 9v4m0 4h.01"/></svg>
+                          <span>Valor acima do aprovado pelo diretor (<b>{R(tetoV)}</b>). Ao confirmar, a solicitação vai ao <b>diretor</b> para aprovar o novo valor antes de seguir.</span>
+                        </div>
+                        <Lbl2 c="MOTIVO DO AUMENTO" err/>
+                        <textarea value={cvIncreaseReason} onChange={e=>setCvIncreaseReason(e.target.value)} rows={2}
+                          placeholder="Explique por que o valor ficou acima do aprovado (ex.: a modelo ficou 2h a mais)."
+                          className={F2+' resize-none'} style={FS2(cvErr.increaseReason)}
+                          onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor=cvErr.increaseReason?'#EF4444':'#E0D9D0'}/>
+                        <Err2 msg={cvErr.increaseReason}/>
+                      </div>
+                    );
+                  })()}
                   <div>
                     <Lbl2 c="NOME DO FAVORECIDO" err/>
                     <input value={cvFavorecido} onChange={e=>setCvFavorecido(e.target.value)} placeholder="Nome de quem recebe o PIX"
@@ -1932,10 +2011,16 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
             </div>
             <div className="px-5 py-4 flex gap-2" style={{borderTop:'1px solid #EDE8E3'}}>
               <button onClick={()=>{setModal(null);setCvErr({});}} className="flex-1 py-2.5 rounded-xl text-sm font-medium" style={{border:'1px solid #E0D9D0',color:'#666'}}>Cancelar</button>
-              <button onClick={convertService} className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 active:scale-95 transition-all" style={{background:'#047857',color:'#fff'}}>
-                <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" d="M5 13l4 4L19 7"/></svg>
-                Confirmar Conversão
-              </button>
+              {(()=>{
+                const tetoV=parseFloat(req.valor_aprovado); const cvv=parseFloat((cvAmount||'').replace(',','.'));
+                const inc = !isNaN(tetoV)&&!isNaN(cvv)&&cvv>tetoV+0.001;
+                return (
+                  <button onClick={convertService} className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 active:scale-95 transition-all" style={{background:inc?'#B45309':'#047857',color:'#fff'}}>
+                    <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" d="M5 13l4 4L19 7"/></svg>
+                    {inc?'Enviar ao diretor para aprovar novo valor':'Confirmar Conversão'}
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -1947,7 +2032,7 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
             <p className="font-bold mb-1" style={{color:'#1A1A1A'}}>Confirmar Aprovação</p>
             <p className="text-sm mb-3" style={{color:'#888'}}>
               {isGestor?(gestorApproveTarget()==='pending_diretor'?'A solicitação será enviada para o Diretor aprovar.':'A solicitação será enviada ao Financeiro.'):
-               isDiretor?((req.tipo==='servico'&&!req.servico_convertido)?'O serviço será marcado como aprovado. O solicitante poderá convertê-lo em pagamento.':'A solicitação será enviada ao Financeiro para revisão.'):'Confirmar aprovação.'}
+               isDiretor?(pendingIncrease?`Você está aprovando o novo valor de ${R(req.amount)} (antes ${R(tetoAprovado)}). Após aprovar, segue ao Financeiro.`:((req.tipo==='servico'&&!req.servico_convertido)?'O serviço será marcado como aprovado. O solicitante poderá convertê-lo em pagamento.':'A solicitação será enviada ao Financeiro para revisão.')):'Confirmar aprovação.'}
             </p>
             <textarea value={comment} onChange={e=>setComment(e.target.value)} rows={2} placeholder="Comentário opcional..."
               className="w-full px-3 py-2 rounded-xl text-sm resize-none mb-3" style={{background:'#F7F6F3',border:'1px solid #E0D9D0',color:'#1A1A1A'}}/>
@@ -3031,6 +3116,7 @@ function App() {
       amount:updatedReq.amount, category:updatedReq.category,
       totvs:updatedReq.totvs, receipts:updatedReq.receipts,
       chave_pix:updatedReq.chave_pix, favorecido:updatedReq.favorecido,
+      ...(updatedReq.valor_aprovado!==undefined?{valor_aprovado:updatedReq.valor_aprovado}:{}),
       status:newStatus, history:updatedReq.history,
     }});
     setEditingReq(null);
@@ -3043,10 +3129,18 @@ function App() {
         totvs:updatedReq.totvs, receipts:updatedReq.receipts,
         ...(updatedReq.chave_pix!==undefined?{chave_pix:updatedReq.chave_pix}:{}),
         ...(updatedReq.favorecido!==undefined?{favorecido:updatedReq.favorecido}:{}),
+        ...(updatedReq.valor_aprovado!==undefined?{valor_aprovado:updatedReq.valor_aprovado}:{}),
         status:newStatus, history:updatedReq.history,
         updated_at:new Date().toISOString(),
       },`?id=eq.${updatedReq.id}`);
-    } catch(e){ showToast('Aviso: erro ao salvar no banco','err'); }
+    } catch(e){
+      // Se o banco recusou (ex.: trava de valor), mostra a mensagem real e desfaz a alteração local
+      const msg = /maior que o aprovado|valor_aprovado/i.test(e.message||'')
+        ? 'Valor superior ao aprovado pelo aprovador — alteração não salva.'
+        : (e.message||'Erro ao salvar no banco');
+      showToast(msg,'err');
+      loadRequests();
+    }
   };
 
   const handleSubmit = async (req) => {
@@ -3084,6 +3178,7 @@ function App() {
         }];
         await sbUpdate('requests',{
           status:action.status, history:newHist,
+          ...(action.fields||{}),
           updated_at:new Date().toISOString(),
         },`?id=eq.${action.id}`);
       } catch(e){ console.warn('Supabase sync:',e); }
