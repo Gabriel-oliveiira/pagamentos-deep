@@ -686,8 +686,7 @@ function DashboardView({ user, requests }) {
   let base = requests;
   if(user.role==='solicitante')              base=requests.filter(r=>r.solicitanteId===user.id);
   else if(user.role==='gestor'&&user.setor)  base=requests.filter(r=>r.setor===user.setor);
-  else if(user.role==='diretor')             base=requests.filter(r=>r.status!=='pending_gestor');
-  // financeiro e admin veem tudo
+  // diretor, financeiro e admin veem tudo (supervisão do processo)
 
   const total = base.length;
   const totalValue = base.reduce((s,r)=>s+r.amount,0);
@@ -2174,7 +2173,15 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
 
 /* ═══════════════════════ SOLICITAÇÕES LIST ═══════════════════════ */
 function SolicitacoesView({ user, requests, onSelect, onNew, dispatch, showToast, tipoFilter='pagamentos' }) {
-  const [filter,setFilter]=useState('all');
+  // Ao entrar, já filtra pelo que está pendente para o próprio papel ("Para Aprovar")
+  const filtroInicial = (()=>{
+    if(user.role==='diretor') return 'pending_diretor';
+    if(user.role==='gestor' && tipoFilter==='pagamentos') return 'pending_gestor';
+    if(user.role==='financeiro' && tipoFilter==='pagamentos') return 'pending_financeiro';
+    if(user.role==='solicitante') return tipoFilter==='servicos' ? 'servico_aprovado' : 'open';
+    return 'all';
+  })();
+  const [filter,setFilter]=useState(filtroInicial);
   const [search,setSearch]=useState('');
   const [selected,setSelected]=useState(new Set());
   const [bulkLoading,setBulkLoading]=useState(false);
@@ -2190,8 +2197,8 @@ function SolicitacoesView({ user, requests, onSelect, onNew, dispatch, showToast
   let base = requests;
   if(user.role==='solicitante')  base=requests.filter(r=>r.solicitanteId===user.id);
   if(user.role==='gestor'&&user.setor) base=requests.filter(r=>r.setor===user.setor);
-  if(user.role==='diretor')      base=requests.filter(r=>r.status!=='pending_gestor'||r.solicitanteId===user.id);
-  if(user.role==='financeiro')   base=requests.filter(r=>['pending_financeiro','completed','cancelled','open'].includes(r.status)||r.solicitanteId===user.id);
+  // diretor, financeiro e admin veem todas as solicitações (supervisão do processo);
+  // agem apenas quando é a etapa deles (botões só aparecem no status certo).
 
   // Filtra pelo tipo de lista
   if(tipoFilter==='pagamentos') base=base.filter(r=>r.tipo==='pagamento'||(r.tipo==='servico'&&r.servico_convertido));
