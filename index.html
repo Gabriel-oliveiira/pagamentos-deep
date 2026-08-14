@@ -2284,11 +2284,24 @@ ${rows.map((r,i)=>`<tr>
     setSelected(new Set());
   };
 
-  /* ── Aprovação em lote: diretor → financeiro ── */
+  /* ── Aprovação em lote: diretor (respeita o tipo/aumento de cada item) ── */
   const bulkApproveDiretor = () => {
-    if(!window.confirm(`Aprovar ${selected.size} solicitação${selected.size!==1?'ões':''} e enviar ao financeiro?`)) return;
+    if(!window.confirm(`Aprovar ${selected.size} solicitação${selected.size!==1?'ões':''}?`)) return;
     for(const id of [...selected]){
-      dispatch({type:'UPDATE',id,status:'pending_financeiro',actor:user.name,label:'Aprovado em lote pelo diretor — enviado ao financeiro',comment:''});
+      const r = requests.find(x=>x.id===id);
+      if(!r) continue;
+      const teto = parseFloat(r.valor_aprovado);
+      const isInc = !isNaN(teto) && r.amount > teto + 0.001;
+      if(r.tipo==='servico' && !r.servico_convertido){
+        // Serviço → vira "Serviço Aprovado" (o trigger fotografa o valor aprovado)
+        dispatch({type:'UPDATE',id,status:'servico_aprovado',actor:user.name,label:'Serviço aprovado em lote pelo diretor — aguardando execução e conversão',comment:''});
+      } else if(isInc){
+        // Aumento → novo teto e vai ao gestor verificar
+        dispatch({type:'UPDATE',id,status:'pending_gestor',actor:user.name,label:`Aumento aprovado em lote pelo diretor (${R(teto)} → ${R(r.amount)}) — enviado ao gestor`,comment:'',fields:{valor_aprovado:r.amount}});
+      } else {
+        // Pagamento / serviço convertido → financeiro
+        dispatch({type:'UPDATE',id,status:'pending_financeiro',actor:user.name,label:'Aprovado em lote pelo diretor — enviado ao financeiro',comment:''});
+      }
     }
     showToast(`${selected.size} solicitação${selected.size!==1?'ões':''} aprovada${selected.size!==1?'s':''}!`);
     setSelected(new Set());
@@ -2684,6 +2697,7 @@ function AdminView({ showToast }) {
                   role:data.role, setor:data.setor||'',
                   allowed_expense_codes:data.allowed_expense_codes,
                   allowed_document_types:data.allowed_document_types,
+                  must_change_password:data.must_change_password,
                 });
                 setUsers(p=>[...p,profile]);
                 showToast('Usuário criado com sucesso!');
@@ -2693,6 +2707,7 @@ function AdminView({ showToast }) {
                   setor:data.setor||'',
                   allowed_expense_codes:data.allowed_expense_codes,
                   allowed_document_types:data.allowed_document_types,
+                  must_change_password:data.must_change_password,
                   ...(data.password?{password:data.password}:{}),
                 });
                 setUsers(p=>p.map(x=>x.id===modal.id?profile:x));
