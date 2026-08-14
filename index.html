@@ -793,6 +793,7 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
   const [amount,setAmount]         = useState(editReq?.amount?String(editReq.amount):'');
   const [category,setCategory]     = useState(editReq?.category||'');
   const [chavePix,setChavePix]     = useState(editReq?.chave_pix||'');
+  const [favorecido,setFavorecido] = useState(editReq?.favorecido||'');
   const [dueDate,setDueDate]       = useState(editReq?.totvs?.dueDate||'');
   const [document,setDocument]     = useState(editReq?.totvs?.document||allowedDocs[0]?.v||15);
   const [expenses,setExpenses]     = useState(
@@ -881,6 +882,7 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
       if(expenses.some(ex=>!(parseFloat(ex.valor)>0)))  e.expenseValor='Informe o valor de cada despesa';
       if(!isNaN(totalVal)&&Math.abs(expSum-totalVal)>0.01) e.expenseSum=`A soma das despesas (${R(expSum)}) deve ser igual ao valor total (${R(totalVal)})`;
       if(!chavePix.trim()) e.chavePix = 'Obrigatório';
+      if(!favorecido.trim()) e.favorecido = 'Obrigatório';
       if(!receipts.length) e.receipts = 'Anexe ao menos um comprovante';
     }
     return e;
@@ -912,7 +914,7 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
       if(isEdit) {
         setTimeout(()=>onSubmit({
           ...editReq, title:title.trim(), description:desc.trim(),
-          amount:val, category, receipts, totvs:totvsData, chave_pix:chavePix,
+          amount:val, category, receipts, totvs:totvsData, chave_pix:chavePix, favorecido:favorecido.trim(),
           status:'pending_gestor',
           history:[...(editReq.history||[]),{date:fmtDate(),actor:user.name,action:'Solicitação editada e reenviada para o gestor',comment:''}]
         }),400);
@@ -920,7 +922,7 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
         setTimeout(()=>onSubmit({
           id:String(Date.now()), tipo:'pagamento',
           title:title.trim(), description:desc.trim(),
-          amount:val, category, receipts, totvs:totvsData, chave_pix:chavePix,
+          amount:val, category, receipts, totvs:totvsData, chave_pix:chavePix, favorecido:favorecido.trim(),
           status:'pending_gestor', solicitanteId:user.id, solicitanteName:user.name,
           created_at:fmtDate(),
           history:[{date:fmtDate(),actor:user.name,action:'Pagamento solicitado e enviado para revisão do gestor',comment:''}]
@@ -1116,12 +1118,20 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
             </button>
           </div>
 
-          {/* Chave PIX */}
-          <div>
-            <Lbl err>CHAVE PIX</Lbl>
-            <input value={chavePix} onChange={e=>setChavePix(e.target.value)} placeholder="CPF, CNPJ, e-mail ou chave aleatória"
-              className={F} style={FS(errors.chavePix)} onFocus={onF} onBlur={onB(errors.chavePix)}/>
-            <Err msg={errors.chavePix}/>
+          {/* Chave PIX + Favorecido */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Lbl err>CHAVE PIX</Lbl>
+              <input value={chavePix} onChange={e=>setChavePix(e.target.value)} placeholder="CPF, CNPJ, e-mail ou chave aleatória"
+                className={F} style={FS(errors.chavePix)} onFocus={onF} onBlur={onB(errors.chavePix)}/>
+              <Err msg={errors.chavePix}/>
+            </div>
+            <div>
+              <Lbl err>NOME DO FAVORECIDO</Lbl>
+              <input value={favorecido} onChange={e=>setFavorecido(e.target.value)} placeholder="Nome de quem recebe o PIX"
+                className={F} style={FS(errors.favorecido)} onFocus={onF} onBlur={onB(errors.favorecido)}/>
+              <Err msg={errors.favorecido}/>
+            </div>
           </div>
         </>)}
 
@@ -1264,6 +1274,7 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
     ? DOCUMENT_TYPES.filter(d => user.allowed_document_types.includes(d.v)) : DOCUMENT_TYPES;
   const [cvAmount,setCvAmount]   = useState(String(req.amount||''));
   const [cvPix,setCvPix]         = useState(req.chave_pix||'');
+  const [cvFavorecido,setCvFavorecido] = useState(req.favorecido||'');
   const [cvDue,setCvDue]         = useState('');
   const [cvDoc,setCvDoc]         = useState(allowedDocs[0]?.v||15);
   const [cvExpenses,setCvExpenses] = useState([{expenseCode:allowedExpenses.length===1?String(allowedExpenses[0].v):'',costCenterCode:'',valor:''}]);
@@ -1365,6 +1376,7 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
     if(cvExpenses.some(ex=>!(parseFloat(ex.valor)>0))) e.expValor='Informe o valor de cada despesa';
     if(!isNaN(cvTotalVal)&&Math.abs(cvExpSum-cvTotalVal)>0.01) e.expSum=`Soma das despesas (${R(cvExpSum)}) ≠ valor total (${R(cvTotalVal)})`;
     if(!cvPix.trim()) e.pix='Obrigatório';
+    if(!cvFavorecido.trim()) e.fav='Obrigatório';
     if(Object.keys(e).length){setCvErr(e);return;}
     const today=localDateStr();
     const cvPlist = nCvPar>1
@@ -1390,7 +1402,7 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
     });
     // Salva chave_pix no registro
     sbUpdate('requests',{
-      chave_pix:cvPix, amount:parseFloat(cvAmount.replace(',','.')),
+      chave_pix:cvPix, favorecido:cvFavorecido.trim(), amount:parseFloat(cvAmount.replace(',','.')),
       totvs:totvsData, status:'pending_gestor', servico_convertido:true,
       history:[...(req.history||[]),{date:fmtDate(),actor:user.name,action:'Serviço concluído — convertido para pagamento e enviado ao gestor',comment:cvPix?`Chave PIX: ${cvPix}`:''}],
       updated_at:new Date().toISOString(),
@@ -1531,6 +1543,7 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                   ['Tipo Documento',  (()=>{ const d=DOCUMENT_TYPES.find(x=>x.v==req.totvs.document); return d?`${d.v} — ${d.l}`:'—'; })()],
                   ['Portador',        req.totvs.bearerCode||'—'],
                   ['Chave PIX',       req.chave_pix||'—'],
+                  ['Favorecido',      req.favorecido||'—'],
                 ].map(([l,v])=>(
                   <div key={l}>
                     <p className="text-xs" style={{color:'#AAA'}}>{l}</p>
@@ -1745,6 +1758,13 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                         onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor=cvErr.pix?'#EF4444':'#E0D9D0'}/>
                       <Err2 msg={cvErr.pix}/>
                     </div>
+                  </div>
+                  <div>
+                    <Lbl2 c="NOME DO FAVORECIDO" err/>
+                    <input value={cvFavorecido} onChange={e=>setCvFavorecido(e.target.value)} placeholder="Nome de quem recebe o PIX"
+                      className={F2} style={FS2(cvErr.fav)}
+                      onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor=cvErr.fav?'#EF4444':'#E0D9D0'}/>
+                    <Err2 msg={cvErr.fav}/>
                   </div>
                   <div>
                     <Lbl2 c="PARCELAS"/>
@@ -2043,7 +2063,7 @@ function SolicitacoesView({ user, requests, onSelect, onNew, dispatch, showToast
 </style></head><body>
 <h1>Relatório de Pagamentos — Grupo Deep</h1>
 <div class="sub">Gerado em ${new Date().toLocaleString('pt-BR')} · ${rows.length} registro${rows.length!==1?'s':''}</div>
-<table><thead><tr><th>#</th><th>TÍTULO</th><th>SOLICITANTE</th><th>VALOR</th><th>CHAVE PIX</th><th>VENCIMENTO</th></tr></thead>
+<table><thead><tr><th>#</th><th>TÍTULO</th><th>SOLICITANTE</th><th>VALOR</th><th>CHAVE PIX</th><th>FAVORECIDO</th><th>VENCIMENTO</th></tr></thead>
 <tbody>
 ${rows.map((r,i)=>`<tr>
   <td>${i+1}</td>
@@ -2051,10 +2071,11 @@ ${rows.map((r,i)=>`<tr>
   <td>${r.solicitanteName||'—'}</td>
   <td class="val">${new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(r.amount||0)}</td>
   <td>${r.chave_pix||'—'}</td>
+  <td>${r.favorecido||'—'}</td>
   <td>${fmtD(r.totvs?.dueDate)}</td>
 </tr>`).join('')}
 </tbody>
-<tfoot><tr><td colspan="3" class="total">TOTAL</td><td class="val total">${new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(total)}</td><td colspan="3"></td></tr></tfoot>
+<tfoot><tr><td colspan="3" class="total">TOTAL</td><td class="val total">${new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(total)}</td><td colspan="4"></td></tr></tfoot>
 </table>
 <div class="foot">Sistema de Pagamentos · Grupo Deep</div>
 </body></html>`;
@@ -2896,6 +2917,7 @@ function App() {
         solicitanteName:   r.solicitante_name||r.created_by||'',
         tipo:              r.tipo||'pagamento',
         chave_pix:         r.chave_pix||'',
+        favorecido:        r.favorecido||'',
         servico_convertido:r.servico_convertido||false,
         setor:             r.setor||'',
         created_at: r.created_at
@@ -2926,6 +2948,7 @@ function App() {
       title:updatedReq.title, description:updatedReq.description,
       amount:updatedReq.amount, category:updatedReq.category,
       totvs:updatedReq.totvs, receipts:updatedReq.receipts,
+      chave_pix:updatedReq.chave_pix, favorecido:updatedReq.favorecido,
       status:newStatus, history:updatedReq.history,
     }});
     setEditingReq(null);
@@ -2936,6 +2959,8 @@ function App() {
         title:updatedReq.title, description:updatedReq.description,
         amount:updatedReq.amount, category:updatedReq.category,
         totvs:updatedReq.totvs, receipts:updatedReq.receipts,
+        ...(updatedReq.chave_pix!==undefined?{chave_pix:updatedReq.chave_pix}:{}),
+        ...(updatedReq.favorecido!==undefined?{favorecido:updatedReq.favorecido}:{}),
         status:newStatus, history:updatedReq.history,
         updated_at:new Date().toISOString(),
       },`?id=eq.${updatedReq.id}`);
@@ -2954,6 +2979,7 @@ function App() {
         category:req.category||'', status:req.status,
         tipo:req.tipo||'pagamento',
         chave_pix:req.chave_pix||'',
+        favorecido:req.favorecido||'',
         servico_convertido:req.servico_convertido||false,
         setor:user.setor||'',
         created_by:req.solicitanteName,
