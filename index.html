@@ -397,6 +397,10 @@ function reducer(state, action) {
       amount: action.amount,
       totvs: action.totvs,
       servico_convertido: true,
+      ...(action.description!==undefined?{description:action.description}:{}),
+      ...(action.receipts!==undefined?{receipts:action.receipts}:{}),
+      ...(action.chave_pix!==undefined?{chave_pix:action.chave_pix}:{}),
+      ...(action.favorecido!==undefined?{favorecido:action.favorecido}:{}),
       history:[...r.history,{date:fmtDate(),actor:action.actor,action:'Serviço concluído — convertido para pagamento e enviado ao gestor',comment:action.comment||''}]
     });
     default: return state;
@@ -1275,6 +1279,13 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
   const [cvAmount,setCvAmount]   = useState(String(req.amount||''));
   const [cvPix,setCvPix]         = useState(req.chave_pix||'');
   const [cvFavorecido,setCvFavorecido] = useState(req.favorecido||'');
+  const [cvObs,setCvObs]         = useState(req.description||'');
+  const [cvReceipts,setCvReceipts] = useState(req.receipts||[]);
+  const cvFileRef = useRef();
+  const handleCvFiles = e => {
+    Array.from(e.target.files).forEach(f=>{ const r=new FileReader(); r.onload=ev=>setCvReceipts(p=>[...p,{name:f.name,data:ev.target.result,type:f.type}]); r.readAsDataURL(f); });
+    e.target.value='';
+  };
   const [cvDue,setCvDue]         = useState('');
   const [cvDoc,setCvDoc]         = useState(allowedDocs[0]?.v||15);
   const [cvExpenses,setCvExpenses] = useState([{expenseCode:allowedExpenses.length===1?String(allowedExpenses[0].v):'',costCenterCode:'',valor:''}]);
@@ -1392,17 +1403,21 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
       issueDate:today, dueDate:cvPlist[0].dueDate, arrivalDate:today,
       document:parseInt(cvDoc), prevision:2, stage:1,
       expenses:cvExpenses.map(ex=>({expenseCode:parseInt(ex.expenseCode),valor:parseFloat(ex.valor)||0,costCenterCode:parseInt(ex.costCenterCode)||1})),
-      observation:req.description,
+      observation:cvObs.trim(),
       parcelas:cvPlist.length,
       parcelasList:cvPlist,
     };
+    const cvReceiptsClean = (cvReceipts||[]).map(r=>({name:r.name,type:r.type,data:r.data}));
     dispatch({type:'CONVERT',id:req.id,
       amount:parseFloat(cvAmount.replace(',','.')),
-      totvs:totvsData, actor:user.name, comment:cvPix?`Chave PIX: ${cvPix}`:''
+      totvs:totvsData, description:cvObs.trim(), receipts:cvReceiptsClean,
+      chave_pix:cvPix, favorecido:cvFavorecido.trim(),
+      actor:user.name, comment:cvPix?`Chave PIX: ${cvPix}`:''
     });
-    // Salva chave_pix no registro
+    // Salva no registro
     sbUpdate('requests',{
       chave_pix:cvPix, favorecido:cvFavorecido.trim(), amount:parseFloat(cvAmount.replace(',','.')),
+      description:cvObs.trim(), receipts:cvReceiptsClean,
       totvs:totvsData, status:'pending_gestor', servico_convertido:true,
       history:[...(req.history||[]),{date:fmtDate(),actor:user.name,action:'Serviço concluído — convertido para pagamento e enviado ao gestor',comment:cvPix?`Chave PIX: ${cvPix}`:''}],
       updated_at:new Date().toISOString(),
@@ -1747,8 +1762,6 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                       <input value={cvAmount} onChange={e=>setCvAmount(e.target.value)} placeholder="0,00"
                         className={F2} style={FS2(cvErr.amount)}
                         onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor=cvErr.amount?'#EF4444':'#E0D9D0'}/>
-                      {!isNaN(parseFloat(req.valor_aprovado)) && !cvErr.amount &&
-                        <p className="text-xs mt-1" style={{color:'#A9A29B'}}>Máx. aprovado: {R(parseFloat(req.valor_aprovado))} — só é permitido reduzir</p>}
                       <Err2 msg={cvErr.amount}/>
                     </div>
                     <div>
@@ -1846,6 +1859,41 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                       <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" d="M12 4v16m8-8H4"/></svg>
                       Adicionar despesa
                     </button>
+                  </div>
+
+                  {/* Observação (editável na conversão) */}
+                  <div>
+                    <Lbl2 c="OBSERVAÇÃO"/>
+                    <textarea value={cvObs} onChange={e=>setCvObs(e.target.value)} rows={3}
+                      placeholder="Detalhes do serviço realizado, fornecedor, etc."
+                      className={F2+' resize-none'} style={FS2(false)}
+                      onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor='#E0D9D0'}/>
+                  </div>
+
+                  {/* Fotos / comprovantes (adicionar mais na conversão) */}
+                  <div>
+                    <Lbl2 c="FOTOS / COMPROVANTES"/>
+                    <div onClick={()=>cvFileRef.current.click()}
+                      className="rounded-xl p-3 text-center cursor-pointer transition"
+                      style={{border:'1.5px dashed #D8CDBE',background:'#FAF8F5'}}
+                      onMouseEnter={e=>e.currentTarget.style.borderColor='#C9BBAA'} onMouseLeave={e=>e.currentTarget.style.borderColor='#D8CDBE'}>
+                      <span className="text-xs font-semibold" style={{color:'#8A6248'}}>+ Adicionar fotos do serviço finalizado</span>
+                    </div>
+                    <input ref={cvFileRef} type="file" accept="image/*,.pdf" multiple onChange={handleCvFiles} style={{display:'none'}}/>
+                    {cvReceipts.length>0&&(
+                      <div className="grid grid-cols-4 gap-2 mt-2">
+                        {cvReceipts.map((r,i)=>(
+                          <div key={i} className="relative rounded-lg overflow-hidden aspect-square" style={{border:'1px solid #EDE8E3'}}>
+                            {r.type?.startsWith('image')&&r.data
+                              ? <img src={r.data} alt="" className="w-full h-full object-cover"/>
+                              : <div className="w-full h-full flex items-center justify-center" style={{background:'#F7F3EE',color:'#C9BBAA'}}><I.file/></div>}
+                            <button type="button" onClick={()=>setCvReceipts(p=>p.filter((_,j)=>j!==i))}
+                              className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full flex items-center justify-center text-xs"
+                              style={{background:'rgba(0,0,0,0.6)',color:'#fff'}}>✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </>);
               })()}
