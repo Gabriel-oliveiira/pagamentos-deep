@@ -2143,12 +2143,12 @@ function SolicitacoesView({ user, requests, onSelect, onNew, dispatch, showToast
 </style></head><body>
 <h1>Relatório de Pagamentos — Grupo Deep</h1>
 <div class="sub">Gerado em ${new Date().toLocaleString('pt-BR')} · ${rows.length} registro${rows.length!==1?'s':''}</div>
-<table><thead><tr><th>#</th><th>TÍTULO</th><th>SOLICITANTE</th><th>VALOR</th><th>CHAVE PIX</th><th>FAVORECIDO</th><th>VENCIMENTO</th></tr></thead>
+<table><thead><tr><th>#</th><th>TÍTULO</th><th>TIPO DOCUMENTO</th><th>VALOR</th><th>CHAVE PIX</th><th>FAVORECIDO</th><th>VENCIMENTO</th></tr></thead>
 <tbody>
 ${rows.map((r,i)=>`<tr>
   <td>${i+1}</td>
   <td>${r.title}</td>
-  <td>${r.solicitanteName||'—'}</td>
+  <td>${(()=>{const d=DOCUMENT_TYPES.find(x=>x.v==r.totvs?.document);return d?`${d.v} — ${d.l}`:'—';})()}</td>
   <td class="val">${new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(r.amount||0)}</td>
   <td>${r.chave_pix||'—'}</td>
   <td>${r.favorecido||'—'}</td>
