@@ -1877,7 +1877,7 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                       className="rounded-xl p-3 text-center cursor-pointer transition"
                       style={{border:'1.5px dashed #D8CDBE',background:'#FAF8F5'}}
                       onMouseEnter={e=>e.currentTarget.style.borderColor='#C9BBAA'} onMouseLeave={e=>e.currentTarget.style.borderColor='#D8CDBE'}>
-                      <span className="text-xs font-semibold" style={{color:'#8A6248'}}>Adicionar fotos.</span>
+                      <span className="text-xs font-semibold" style={{color:'#8A6248'}}>Adicionar fotos</span>
                     </div>
                     <input ref={cvFileRef} type="file" accept="image/*,.pdf" multiple onChange={handleCvFiles} style={{display:'none'}}/>
                     {cvReceipts.length>0&&(
