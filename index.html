@@ -925,7 +925,7 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
       if(expenses.some(ex=>!ex.costCenterCode)) e.costCenter='Selecione o centro de custo de cada despesa';
       if(expenses.some(ex=>!(parseFloat(ex.valor)>0)))  e.expenseValor='Informe o valor de cada despesa';
       if(!isNaN(totalVal)&&Math.abs(expSum-totalVal)>0.01) e.expenseSum=`A soma das despesas (${R(expSum)}) deve ser igual ao valor total (${R(totalVal)})`;
-      if(!chavePix.trim()) e.chavePix = 'Obrigatório';
+      if(!chavePix.trim() && parseInt(document)!==2) e.chavePix = 'Obrigatório';
       if(!favorecido.trim()) e.favorecido = 'Obrigatório';
       if(!receipts.length) e.receipts = 'Anexe ao menos um comprovante';
     }
@@ -1187,7 +1187,7 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
           {/* Chave PIX + Favorecido */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Lbl err>CHAVE PIX</Lbl>
+              <Lbl err={parseInt(document)!==2}>CHAVE PIX{parseInt(document)===2&&<span style={{color:'#AAA',fontWeight:400}}> (opcional p/ boleto)</span>}</Lbl>
               <input value={chavePix} onChange={e=>setChavePix(e.target.value)} placeholder="CPF, CNPJ, e-mail ou chave aleatória"
                 className={F} style={FS(errors.chavePix)} onFocus={onF} onBlur={onB(errors.chavePix)}/>
               <Err msg={errors.chavePix}/>
@@ -1463,7 +1463,7 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
     if(cvExpenses.some(ex=>!ex.costCenterCode)) e.exp=e.exp||'Selecione o centro de custo de cada despesa';
     if(cvExpenses.some(ex=>!(parseFloat(ex.valor)>0))) e.expValor='Informe o valor de cada despesa';
     if(!isNaN(cvTotalVal)&&Math.abs(cvExpSum-cvTotalVal)>0.01) e.expSum=`Soma das despesas (${R(cvExpSum)}) ≠ valor total (${R(cvTotalVal)})`;
-    if(!cvPix.trim()) e.pix='Obrigatório';
+    if(!cvPix.trim() && parseInt(cvDoc)!==2) e.pix='Obrigatório';
     if(!cvFavorecido.trim()) e.fav='Obrigatório';
     if(Object.keys(e).length){setCvErr(e);return;}
     const today=localDateStr();
@@ -1874,7 +1874,7 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                     </div>
                   </div>
                   <div>
-                    <Lbl2 c="CHAVE PIX" err/>
+                    <Lbl2 c={parseInt(cvDoc)===2?"CHAVE PIX (opcional p/ boleto)":"CHAVE PIX"} err={parseInt(cvDoc)!==2}/>
                     <input value={cvPix} onChange={e=>setCvPix(e.target.value)} placeholder="CPF, CNPJ, e-mail ou chave aleatória"
                       className={F2} style={FS2(cvErr.pix)}
                       onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor=cvErr.pix?'#EF4444':'#E0D9D0'}/>
