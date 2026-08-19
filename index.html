@@ -1310,7 +1310,27 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
   const [modal,setModal]=useState(null);
   const [comment,setComment]=useState('');
   const [lightbox,setLightbox]=useState(null);
-  // Abre um comprovante (PDF ou outro) numa nova aba, convertendo o data URL em Blob
+  const [lightboxUrl,setLightboxUrl]=useState(null);
+  // Converte o data URL do comprovante num Blob URL (melhor p/ exibir PDF em iframe)
+  useEffect(()=>{
+    if(!lightbox || !lightbox.data){ setLightboxUrl(null); return; }
+    let url=null;
+    try{
+      if(lightbox.data.startsWith('data:')){
+        const [meta,b64]=lightbox.data.split(',');
+        const mime=(meta.match(/data:([^;]+)/)||[])[1]||'application/octet-stream';
+        const bin=atob(b64);
+        const bytes=new Uint8Array(bin.length);
+        for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+        url=URL.createObjectURL(new Blob([bytes],{type:mime}));
+      }else{
+        url=lightbox.data;
+      }
+      setLightboxUrl(url);
+    }catch(e){ setLightboxUrl(lightbox.data); }
+    return ()=>{ if(url && url.startsWith('blob:')) URL.revokeObjectURL(url); };
+  },[lightbox]);
+  // Fallback: abrir em nova aba
   const openReceipt = (r) => {
     try {
       if (r?.data && r.data.startsWith('data:')) {
@@ -1703,7 +1723,7 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                       <img src={r.data} alt="" className="w-full h-full object-cover"/>
                     </div>
                   ):(
-                    <div key={i} onClick={()=>openReceipt(r)} title={`Abrir ${r.name}`} className="rounded-xl aspect-square flex flex-col items-center justify-center gap-1 p-2 cursor-pointer hover:opacity-80 transition" style={{background:'#F7F3EE',border:'1px solid #EDE8E3'}}>
+                    <div key={i} onClick={()=>setLightbox(r)} title={`Abrir ${r.name}`} className="rounded-xl aspect-square flex flex-col items-center justify-center gap-1 p-2 cursor-pointer hover:opacity-80 transition" style={{background:'#F7F3EE',border:'1px solid #EDE8E3'}}>
                       <span style={{color:'#C9BBAA'}}><I.file/></span>
                       <span className="text-xs text-center truncate w-full" style={{color:'#888',fontSize:'10px'}}>{r.name}</span>
                     </div>
@@ -1827,10 +1847,27 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
         </div>
       </div>
 
-      {/* Lightbox */}
+      {/* Lightbox / Visualizador de comprovante */}
       {lightbox&&(
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overlay" style={{background:'rgba(0,0,0,.9)'}} onClick={()=>setLightbox(null)}>
-          <img src={lightbox.data} alt="" className="max-w-full max-h-full rounded-2xl"/>
+        <div className="fixed inset-0 z-50 flex flex-col p-4 overlay" style={{background:'rgba(0,0,0,.9)'}} onClick={()=>setLightbox(null)}>
+          <div className="flex items-center justify-between mb-3 shrink-0" onClick={e=>e.stopPropagation()}>
+            <span className="text-sm font-medium truncate pr-3" style={{color:'#EDE8E3'}}>{lightbox.name||'Comprovante'}</span>
+            <div className="flex items-center gap-2">
+              <button onClick={()=>openReceipt(lightbox)} className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{background:'#C9BBAA',color:'#282425'}}>Abrir em nova aba</button>
+              <button onClick={()=>setLightbox(null)} className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{background:'rgba(255,255,255,.15)',color:'#fff'}}>Fechar ✕</button>
+            </div>
+          </div>
+          <div className="flex-1 min-h-0 flex items-center justify-center" onClick={e=>e.stopPropagation()}>
+            {lightbox.type?.startsWith('image')?(
+              <img src={lightboxUrl||lightbox.data} alt="" className="max-w-full max-h-full rounded-2xl"/>
+            ):(
+              lightboxUrl?(
+                <iframe src={lightboxUrl} title={lightbox.name||'Comprovante'} className="w-full h-full rounded-2xl" style={{background:'#fff',border:'none'}}/>
+              ):(
+                <span style={{color:'#EDE8E3'}}>Carregando…</span>
+              )
+            )}
+          </div>
         </div>
       )}
 
