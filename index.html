@@ -2720,30 +2720,34 @@ function AdminView({ showToast }) {
         ):(
           <div className="space-y-2">
             {users.map(u=>(
-              <div key={u.id} className="rounded-xl px-5 py-4 flex items-center gap-4"
+              <div key={u.id} className="rounded-xl px-4 py-4 flex flex-col sm:flex-row sm:items-center gap-3"
                 style={{background:'#fff',border:'1px solid #EDE8E3',opacity:u.is_active?1:0.55}}>
-                <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                  style={{background:'rgba(201,187,170,.15)',color:'#C9BBAA'}}>
-                  {u.name.split(' ').map(w=>w[0]).slice(0,2).join('')}
+                <div className="flex items-start gap-3 flex-1 min-w-0">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                    style={{background:'rgba(201,187,170,.15)',color:'#C9BBAA'}}>
+                    {u.name.split(' ').map(w=>w[0]).slice(0,2).join('')}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-semibold text-sm" style={{color:'#1A1A1A'}}>{u.name}</p>
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                        style={{background:`${ROLE_COLOR[u.role]}18`,color:ROLE_COLOR[u.role]}}>
+                        {ROLE_LABELS[u.role]}
+                      </span>
+                      {(u.allowed_expense_codes?.length>0||u.allowed_document_types?.length>0)&&(
+                        <span className="text-xs px-2 py-0.5 rounded-full" style={{background:'#FEF3E2',color:'#B45309'}}>Restrito</span>
+                      )}
+                    </div>
+                    <p className="text-xs truncate mt-0.5" style={{color:'#AAA'}}>{u.email}{u.setor?<span className="ml-2 px-1.5 py-0.5 rounded" style={{background:'#F5F0EB',color:'#888'}}>{u.setor}</span>:null}</p>
+                  </div>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm" style={{color:'#1A1A1A'}}>{u.name}</p>
-                  <p className="text-xs" style={{color:'#AAA'}}>{u.email}{u.setor?<span className="ml-2 px-1.5 py-0.5 rounded text-xs" style={{background:'#F5F0EB',color:'#888'}}>{u.setor}</span>:null}</p>
-                </div>
-                <div className="flex items-center gap-3 flex-shrink-0">
-                  <span className="text-xs font-bold px-2.5 py-1 rounded-full"
-                    style={{background:`${ROLE_COLOR[u.role]}18`,color:ROLE_COLOR[u.role]}}>
-                    {ROLE_LABELS[u.role]}
-                  </span>
-                  {(u.allowed_expense_codes?.length>0||u.allowed_document_types?.length>0)&&(
-                    <span className="text-xs px-2 py-0.5 rounded-full" style={{background:'#FEF3E2',color:'#B45309'}}>Restrito</span>
-                  )}
-                  <button onClick={()=>setModal(u)} className="text-xs px-3 py-1.5 rounded-lg transition"
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button onClick={()=>setModal(u)} className="flex-1 sm:flex-none text-xs px-4 py-2 rounded-lg transition"
                     style={{background:'#F5F0EB',color:'#888'}}
                     onMouseEnter={e=>e.currentTarget.style.background='#EDE8E3'} onMouseLeave={e=>e.currentTarget.style.background='#F5F0EB'}>
                     Editar
                   </button>
-                  <button onClick={()=>toggleActive(u)} className="text-xs px-3 py-1.5 rounded-lg transition"
+                  <button onClick={()=>toggleActive(u)} className="flex-1 sm:flex-none text-xs px-4 py-2 rounded-lg transition"
                     style={{background:u.is_active?'#FEF2F2':'#F0FDF4',color:u.is_active?'#DC2626':'#15803D'}}>
                     {u.is_active?'Desativar':'Ativar'}
                   </button>
