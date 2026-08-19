@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
 <title>Pagamentos · Deep</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -686,10 +686,10 @@ function DashboardView({ user, requests }) {
   })).filter(s=>s.value>0);
 
   const KPI = ({label,value,sub,accent}) => (
-    <div className="rounded-2xl p-5" style={{background:'#fff',border:'1px solid #EDE8E3'}}>
-      <p className="text-xs font-semibold mb-3" style={{color:'#999',letterSpacing:'0.07em'}}>{label}</p>
-      <p className="text-2xl font-bold" style={{color:accent||'#1A1A1A'}}>{value}</p>
-      {sub && <p className="text-xs mt-1" style={{color:'#AAA'}}>{sub}</p>}
+    <div className="rounded-2xl p-4 md:p-5" style={{background:'#fff',border:'1px solid #EDE8E3',minWidth:0}}>
+      <p className="text-xs font-semibold mb-3 truncate" style={{color:'#999',letterSpacing:'0.07em'}} title={label}>{label}</p>
+      <p className="font-bold leading-tight" style={{color:accent||'#1A1A1A',fontSize:'clamp(0.95rem, 4.6vw, 1.5rem)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}} title={typeof value==='string'?value:undefined}>{value}</p>
+      {sub && <p className="text-xs mt-1 truncate" style={{color:'#AAA'}} title={sub}>{sub}</p>}
     </div>
   );
 
@@ -2466,7 +2466,7 @@ ${rows.map((r,i)=>`<tr>
       )}
 
       {/* Table header (desktop) */}
-      <div className="hidden md:grid gap-3 px-4 py-2 mb-1 text-xs font-bold" style={{color:'#AAA',letterSpacing:'0.07em',gridTemplateColumns:(isGestorList||isDiretorList)?'24px 20px 1fr 1fr auto auto auto 24px':'20px 1fr 1fr auto auto auto 24px'}}>
+      <div className="hidden md:grid gap-3 px-4 py-2 mb-1 text-xs font-bold" style={{color:'#AAA',letterSpacing:'0.07em',gridTemplateColumns:(isGestorList||isDiretorList)?'24px 20px minmax(0,2fr) minmax(0,1.1fr) 130px 100px 160px 24px':'20px minmax(0,2fr) minmax(0,1.1fr) 130px 100px 160px 24px'}}>
         {(isGestorList||isDiretorList)&&(
           <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{accentColor:'#282425',cursor:'pointer'}} title="Selecionar todas elegíveis"/>
         )}
@@ -2497,7 +2497,7 @@ ${rows.map((r,i)=>`<tr>
               onMouseLeave={e=>{if(!selected.has(r.id)){e.currentTarget.style.borderColor='#EDE8E3';e.currentTarget.style.boxShadow='none'}}}>
               {/* Desktop row */}
               <div className="hidden md:grid gap-3 px-4 py-3.5 items-center"
-                style={{gridTemplateColumns:(isGestorList||isDiretorList)?'24px 20px 1fr 1fr auto auto auto 24px':'20px 1fr 1fr auto auto auto 24px'}}>
+                style={{gridTemplateColumns:(isGestorList||isDiretorList)?'24px 20px minmax(0,2fr) minmax(0,1.1fr) 130px 100px 160px 24px':'20px minmax(0,2fr) minmax(0,1.1fr) 130px 100px 160px 24px'}}>
                 {(isGestorList||isDiretorList)&&(
                   <input type="checkbox"
                     checked={selected.has(r.id)}
