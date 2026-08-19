@@ -12,6 +12,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
   :root{
     --noir:#282425; --noir-soft:#332E2F; --noir-line:#3A3536;
@@ -1306,50 +1307,89 @@ function buildTotvsPayload(req) {
 }
 
 /* ═══════════════════════ REQUEST DETAIL ═══════════════════════ */
+function ReceiptViewer({ receipt, onClose }) {
+  const isImage = receipt?.type?.startsWith('image');
+  const [zoom,setZoom]   = useState(1);      // 1 = ajustado à largura
+  const [pages,setPages] = useState([]);     // dataURLs das páginas do PDF
+  const [loading,setLoading] = useState(!isImage);
+  const [err,setErr]     = useState(false);
+
+  useEffect(()=>{
+    if(isImage || !receipt?.data) return;
+    let cancelled=false;
+    (async()=>{
+      try{
+        const b64 = receipt.data.includes(',') ? receipt.data.split(',')[1] : receipt.data;
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+        const lib = window.pdfjsLib;
+        if(!lib){ setErr(true); setLoading(false); return; }
+        lib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        const pdf = await lib.getDocument({data:bytes}).promise;
+        const imgs=[];
+        for(let p=1;p<=pdf.numPages;p++){
+          if(cancelled) return;
+          const page = await pdf.getPage(p);
+          const viewport = page.getViewport({scale:2});
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+          imgs.push(canvas.toDataURL('image/png'));
+        }
+        if(!cancelled){ setPages(imgs); setLoading(false); }
+      }catch(e){ if(!cancelled){ setErr(true); setLoading(false); } }
+    })();
+    return ()=>{ cancelled=true; };
+  },[receipt]);
+
+  const zIn  = ()=>setZoom(z=>Math.min(4, +(z+0.25).toFixed(2)));
+  const zOut = ()=>setZoom(z=>Math.max(0.5, +(z-0.25).toFixed(2)));
+  const zFit = ()=>setZoom(1);
+  const btn = {background:'rgba(255,255,255,.15)',color:'#fff'};
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col overlay" style={{background:'rgba(0,0,0,.92)'}}>
+      <div className="flex items-center justify-between gap-2 px-4 py-3 shrink-0">
+        <span className="text-sm font-medium truncate" style={{color:'#EDE8E3'}}>{receipt.name||'Comprovante'}</span>
+        <div className="flex items-center gap-1.5">
+          {!isImage && !loading && !err && (
+            <>
+              <button onClick={zOut} className="w-9 h-9 rounded-lg text-lg font-bold flex items-center justify-center" style={btn}>−</button>
+              <button onClick={zFit} className="px-2.5 h-9 rounded-lg text-xs font-semibold flex items-center justify-center" style={btn}>{Math.round(zoom*100)}%</button>
+              <button onClick={zIn} className="w-9 h-9 rounded-lg text-lg font-bold flex items-center justify-center" style={btn}>+</button>
+            </>
+          )}
+          <button onClick={onClose} className="w-9 h-9 rounded-lg text-base font-semibold flex items-center justify-center" style={{background:'rgba(255,255,255,.15)',color:'#fff'}}>✕</button>
+        </div>
+      </div>
+
+      <div className="flex-1 min-h-0" style={{overflow:'auto',WebkitOverflowScrolling:'touch'}}>
+        {isImage ? (
+          <div className="w-full flex justify-center p-3">
+            <img src={receipt.data} alt="" style={{maxWidth:'100%',height:'auto',borderRadius:'12px'}}/>
+          </div>
+        ) : loading ? (
+          <div className="w-full h-full flex items-center justify-center"><span style={{color:'#EDE8E3'}}>Carregando PDF…</span></div>
+        ) : err ? (
+          <div className="w-full h-full flex items-center justify-center px-6 text-center"><span style={{color:'#EDE8E3'}}>Não foi possível exibir este arquivo.</span></div>
+        ) : (
+          <div style={{width:`${zoom*100}%`,maxWidth:'none',margin:'0 auto',padding:'12px 0'}}>
+            {pages.map((src,i)=>(
+              <img key={i} src={src} alt={`Página ${i+1}`} style={{display:'block',width:'100%',height:'auto',margin:'0 auto 12px',background:'#fff',borderRadius:'6px'}}/>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
   const [modal,setModal]=useState(null);
   const [comment,setComment]=useState('');
   const [lightbox,setLightbox]=useState(null);
-  const [lightboxUrl,setLightboxUrl]=useState(null);
-  // Converte o data URL do comprovante num Blob URL (melhor p/ exibir PDF em iframe)
-  useEffect(()=>{
-    if(!lightbox || !lightbox.data){ setLightboxUrl(null); return; }
-    let url=null;
-    try{
-      if(lightbox.data.startsWith('data:')){
-        const [meta,b64]=lightbox.data.split(',');
-        const mime=(meta.match(/data:([^;]+)/)||[])[1]||'application/octet-stream';
-        const bin=atob(b64);
-        const bytes=new Uint8Array(bin.length);
-        for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
-        url=URL.createObjectURL(new Blob([bytes],{type:mime}));
-      }else{
-        url=lightbox.data;
-      }
-      setLightboxUrl(url);
-    }catch(e){ setLightboxUrl(lightbox.data); }
-    return ()=>{ if(url && url.startsWith('blob:')) URL.revokeObjectURL(url); };
-  },[lightbox]);
-  // Fallback: abrir em nova aba
-  const openReceipt = (r) => {
-    try {
-      if (r?.data && r.data.startsWith('data:')) {
-        const [meta, b64] = r.data.split(',');
-        const mime = (meta.match(/data:([^;]+)/) || [])[1] || 'application/octet-stream';
-        const bin = atob(b64);
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        const blob = new Blob([bytes], { type: mime });
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank');
-        setTimeout(() => URL.revokeObjectURL(url), 60000);
-      } else if (r?.data) {
-        window.open(r.data, '_blank');
-      }
-    } catch (e) {
-      showToast && showToast('Não foi possível abrir o arquivo.', 'error');
-    }
-  };
   const [totvsLoading, setTotvsLoading] = useState(false);
   const [totvsResult,  setTotvsResult]  = useState(null);
   // Converter serviço em pagamento
@@ -1847,28 +1887,9 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
         </div>
       </div>
 
-      {/* Lightbox / Visualizador de comprovante */}
+      {/* Visualizador de comprovante */}
       {lightbox&&(
-        <div className="fixed inset-0 z-50 flex flex-col p-4 overlay" style={{background:'rgba(0,0,0,.9)'}} onClick={()=>setLightbox(null)}>
-          <div className="flex items-center justify-between mb-3 shrink-0" onClick={e=>e.stopPropagation()}>
-            <span className="text-sm font-medium truncate pr-3" style={{color:'#EDE8E3'}}>{lightbox.name||'Comprovante'}</span>
-            <div className="flex items-center gap-2">
-              <button onClick={()=>openReceipt(lightbox)} className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{background:'#C9BBAA',color:'#282425'}}>Abrir em nova aba</button>
-              <button onClick={()=>setLightbox(null)} className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{background:'rgba(255,255,255,.15)',color:'#fff'}}>Fechar ✕</button>
-            </div>
-          </div>
-          <div className="flex-1 min-h-0 flex items-center justify-center" onClick={e=>e.stopPropagation()}>
-            {lightbox.type?.startsWith('image')?(
-              <img src={lightboxUrl||lightbox.data} alt="" className="max-w-full max-h-full rounded-2xl"/>
-            ):(
-              lightboxUrl?(
-                <iframe src={lightboxUrl} title={lightbox.name||'Comprovante'} className="w-full h-full rounded-2xl" style={{background:'#fff',border:'none'}}/>
-              ):(
-                <span style={{color:'#EDE8E3'}}>Carregando…</span>
-              )
-            )}
-          </div>
-        </div>
+        <ReceiptViewer receipt={lightbox} onClose={()=>setLightbox(null)}/>
       )}
 
       {/* Modals */}
