@@ -1301,7 +1301,7 @@ function buildTotvsPayload(req) {
         costCenterCode:e.costCenterCode||1,
         proratedPercentage:Math.round((e.valor/(req.amount||1))*10000)/100,
       })),
-      ...(t.observation?{observations:[{observation:t.observation}]}:{}),
+      ...(t.observation?{observations:[{observation:String(t.observation).replace(/\s+/g,' ').trim().slice(0,80)}]}:{}),
     })),
   };
 }
@@ -2044,10 +2044,11 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                   {/* Observação (editável na conversão) */}
                   <div>
                     <Lbl2 c="OBSERVAÇÃO"/>
-                    <textarea value={cvObs} onChange={e=>setCvObs(e.target.value)} rows={3}
+                    <textarea value={cvObs} onChange={e=>setCvObs(e.target.value.slice(0,80))} rows={3} maxLength={80}
                       placeholder="Detalhes do serviço realizado, fornecedor, etc."
                       className={F2+' resize-none'} style={FS2(false)}
                       onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor='#E0D9D0'}/>
+                    <p className="text-xs mt-1 text-right" style={{color:cvObs.length>=80?'#DC2626':'#AAA'}}>{cvObs.length}/80 (limite do TOTVS)</p>
                   </div>
 
                   {/* Fotos / comprovantes (adicionar mais na conversão) */}
