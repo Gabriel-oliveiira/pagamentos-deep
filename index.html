@@ -857,15 +857,7 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
   const tetoEdit = parseFloat(editReq?.valor_aprovado);
   const isIncreaseEdit = !!editReq?.servico_convertido && !isNaN(tetoEdit) && parseFloat((amount||'').replace(',','.')) > tetoEdit + 0.001;
 
-  const genDuplicateCode = () => {
-    const today = new Date();
-    const ymd = today.getFullYear().toString()
-      + String(today.getMonth()+1).padStart(2,'0')
-      + String(today.getDate()).padStart(2,'0');
-    const todayStr = today.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'});
-    const seq = (requests||[]).filter(r=>r.created_at?.startsWith(todayStr)).length + 1;
-    return parseInt(ymd + String(seq));
-  };
+  const genDuplicateCode = () => genDupCode();
 
   const handleFiles = e => {
     Array.from(e.target.files).forEach(f=>{
@@ -1268,6 +1260,12 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
   );
 }
 
+/* Gera um código de duplicata único (MMDDHHMMSS) — cabe em int32 e nunca reusa códigos antigos */
+function genDupCode(){
+  const d=new Date(), p=v=>String(v).padStart(2,'0');
+  return parseInt(`${p(d.getMonth()+1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`,10);
+}
+
 /* ═══════════════════════ TOTVS PAYLOAD BUILDER ═══════════════════════ */
 function buildTotvsPayload(req) {
   const t = req.totvs || {};
@@ -1571,7 +1569,7 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
   };
 
   const t = req.totvs || {};
-  const buildPayload = () => buildTotvsPayload(req);
+  const buildPayload = (dupOverride) => buildTotvsPayload(dupOverride!=null?{...req,totvs:{...(req.totvs||{}),duplicateCode:dupOverride}}:req);
 
   const callTotvs = async () => {
     setTotvsLoading('auth'); setTotvsResult(null);
@@ -1597,17 +1595,20 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
       const token = authData.access_token || authData.token || authData.accessToken;
       if(!token) throw new Error('Token não encontrado na resposta de autenticação.');
 
-      // 2. Envia duplicata com token fresco
+      // 2. Envia duplicata com token fresco. Gera um código de duplicata novo a cada tentativa
+      //    (evita colisão "DuplicateCode already exist" após resets/re-tentativas).
       setTotvsLoading('sending');
+      const freshDup = genDupCode();
       const res = await fetch(TOTVS_API, {
         method: 'POST',
         headers: {'Content-Type':'application/json','Accept':'application/json','Authorization':`Bearer ${token}`},
-        body: JSON.stringify(buildPayload()),
+        body: JSON.stringify(buildPayload(freshDup)),
       });
       if(res.ok){
-        // Marca como enviado no banco e atualiza status automaticamente — sem segundo clique
+        // Marca como enviado no banco e guarda o código realmente usado
+        const newTotvs={...(req.totvs||{}),duplicateCode:freshDup};
         dispatch({type:'MARK_SENT', id:req.id});
-        sbUpdate('requests',{sent_to_totvs:true},`?id=eq.${req.id}`).catch(()=>{});
+        sbUpdate('requests',{sent_to_totvs:true, totvs:newTotvs},`?id=eq.${req.id}`).catch(()=>{});
         setTotvsLoading(false);
         finalizePay();
         return;
