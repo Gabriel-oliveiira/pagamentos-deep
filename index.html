@@ -1260,10 +1260,10 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
   );
 }
 
-/* Gera um código de duplicata único (MMDDHHMMSS) — cabe em int32 e nunca reusa códigos antigos */
+/* Gera um código de duplicata único: timestamp Unix em segundos.
+   É sempre crescente (nunca reusa, sem conflito entre anos) e cabe em int32 (~1.78e9 < 2.14e9). */
 function genDupCode(){
-  const d=new Date(), p=v=>String(v).padStart(2,'0');
-  return parseInt(`${p(d.getMonth()+1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`,10);
+  return Math.floor(Date.now()/1000);
 }
 
 /* ═══════════════════════ TOTVS PAYLOAD BUILDER ═══════════════════════ */
@@ -1346,6 +1346,26 @@ function ReceiptViewer({ receipt, onClose }) {
   const zOut = ()=>setZoom(z=>Math.max(0.5, +(z-0.25).toFixed(2)));
   const zFit = ()=>setZoom(1);
   const btn = {background:'rgba(255,255,255,.15)',color:'#fff'};
+  // Baixa o arquivo no formato original (PDF/imagem) com o nome dele
+  const download = () => {
+    try {
+      let href = receipt.data, revoke = false;
+      if (receipt?.data?.startsWith('data:')) {
+        const [meta,b64] = receipt.data.split(',');
+        const mime = (meta.match(/data:([^;]+)/)||[])[1] || 'application/octet-stream';
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+        href = URL.createObjectURL(new Blob([bytes],{type:mime}));
+        revoke = true;
+      }
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = receipt.name || 'comprovante';
+      document.body.appendChild(a); a.click(); a.remove();
+      if (revoke) setTimeout(()=>URL.revokeObjectURL(href), 60000);
+    } catch(e){}
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col overlay" style={{background:'rgba(0,0,0,.92)'}}>
@@ -1359,6 +1379,7 @@ function ReceiptViewer({ receipt, onClose }) {
               <button onClick={zIn} className="w-9 h-9 rounded-lg text-lg font-bold flex items-center justify-center" style={btn}>+</button>
             </>
           )}
+          <button onClick={download} className="px-3 h-9 rounded-lg text-xs font-semibold flex items-center justify-center gap-1" style={{background:'#C9BBAA',color:'#282425'}}>⬇ Baixar</button>
           <button onClick={onClose} className="w-9 h-9 rounded-lg text-base font-semibold flex items-center justify-center" style={{background:'rgba(255,255,255,.15)',color:'#fff'}}>✕</button>
         </div>
       </div>
