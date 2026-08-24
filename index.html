@@ -1117,7 +1117,7 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
           <div>
             <Lbl>TIPO DE DOCUMENTO</Lbl>
             <div style={{maxWidth:'320px'}}>
-              <SearchSelect value={document} onChange={v=>setDocument(v)}
+              <SearchSelect value={document} onChange={v=>{setDocument(v); if(parseInt(v)===2) setChavePix('');}}
                 options={allowedDocs.map(d=>({value:d.v,label:`${d.v} — ${d.l}`}))} placeholder="Selecionar documento..."/>
             </div>
           </div>
@@ -1159,9 +1159,10 @@ function NewRequestForm({ user, requests, onSubmit, onBack, editReq, defaultTipo
           {/* Chave PIX + Favorecido */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Lbl err={parseInt(document)!==2}>CHAVE PIX{parseInt(document)===2&&<span style={{color:'#AAA',fontWeight:400}}> (opcional p/ boleto)</span>}</Lbl>
-              <input value={chavePix} onChange={e=>setChavePix(e.target.value)} placeholder="CPF, CNPJ, e-mail ou chave aleatória"
-                className={F} style={FS(errors.chavePix)} onFocus={onF} onBlur={onB(errors.chavePix)}/>
+              <Lbl err={parseInt(document)!==2}>CHAVE PIX{parseInt(document)===2&&<span style={{color:'#AAA',fontWeight:400}}> (bloqueado p/ boleto)</span>}</Lbl>
+              <input value={parseInt(document)===2?'':chavePix} onChange={e=>setChavePix(e.target.value)} disabled={parseInt(document)===2}
+                placeholder={parseInt(document)===2?'Não se aplica a boleto':'CPF, CNPJ, e-mail ou chave aleatória'}
+                className={F} style={{...FS(errors.chavePix),...(parseInt(document)===2?{background:'#F2EFEA',color:'#B8B0A6',cursor:'not-allowed'}:{})}} onFocus={onF} onBlur={onB(errors.chavePix)}/>
               <Err msg={errors.chavePix}/>
             </div>
             <div>
@@ -1953,9 +1954,10 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                     </div>
                   </div>
                   <div>
-                    <Lbl2 c={parseInt(cvDoc)===2?"CHAVE PIX (opcional p/ boleto)":"CHAVE PIX"} err={parseInt(cvDoc)!==2}/>
-                    <input value={cvPix} onChange={e=>setCvPix(e.target.value)} placeholder="CPF, CNPJ, e-mail ou chave aleatória"
-                      className={F2} style={FS2(cvErr.pix)}
+                    <Lbl2 c={parseInt(cvDoc)===2?"CHAVE PIX (bloqueado p/ boleto)":"CHAVE PIX"} err={parseInt(cvDoc)!==2}/>
+                    <input value={parseInt(cvDoc)===2?'':cvPix} onChange={e=>setCvPix(e.target.value)} disabled={parseInt(cvDoc)===2}
+                      placeholder={parseInt(cvDoc)===2?'Não se aplica a boleto':'CPF, CNPJ, e-mail ou chave aleatória'}
+                      className={F2} style={{...FS2(cvErr.pix),...(parseInt(cvDoc)===2?{background:'#F2EFEA',color:'#B8B0A6',cursor:'not-allowed'}:{})}}
                       onFocus={e=>e.target.style.borderColor='#C9BBAA'} onBlur={e=>e.target.style.borderColor=cvErr.pix?'#EF4444':'#E0D9D0'}/>
                     <Err2 msg={cvErr.pix}/>
                   </div>
@@ -1985,7 +1987,7 @@ function RequestDetail({ req, user, onBack, dispatch, showToast, onEdit }) {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <Lbl2 c="TIPO DE DOCUMENTO"/>
-                      <SearchSelect value={cvDoc} onChange={v=>setCvDoc(v)}
+                      <SearchSelect value={cvDoc} onChange={v=>{setCvDoc(v); if(parseInt(v)===2) setCvPix('');}}
                         options={allowedDocs.map(d=>({value:d.v,label:`${d.v} — ${d.l}`}))} placeholder="Selecionar documento..."/>
                     </div>
                     <div>
